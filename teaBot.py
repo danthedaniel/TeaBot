@@ -24,13 +24,9 @@ def check_modmail(subreddit):
 	if (time.time() - cache_timouts['modmail']) > bot.r.config.cache_timeout + 1:
 		cache_timouts['modmail'] = time.time()
 
-		for modmail in subreddit.get_mod_mail(limit=6):
-			#if str(modmail.author) == 'teaearlgraycold':
-				#import pdb; pdb.set_trace()
-			
+		for modmail in subreddit.get_mod_mail(limit=6):		
 			#Perform checks on top level modmail			
 			if modmail.new == True:
-				print('[' + eval(bot.ts) + '] Found new message')
 				modmail.mark_as_read()
 
 				if report_check.search(modmail.subject) == None and sub_prefix.search(modmail.subject) != None:
@@ -46,17 +42,14 @@ def check_modmail(subreddit):
 					print('[' + eval(bot.ts) + '] Sent modmail to ' + str(modmail.author) + ' about accidental ELI5 thread in modmail')
 
 				if modmail.distinguished == 'moderator':
-					print('[' + eval(bot.ts) + '] Found mod message')
 					modmail_commands(modmail, subreddit)
 
 			#Perform checks on modmail replies
 			for reply in modmail.replies:
 				if reply.new == True:
-					print('[' + eval(bot.ts) + '] Found new message')
 					reply.mark_as_read()
 
 					if reply.distinguished == 'moderator':
-						print('[' + eval(bot.ts) + '] Found mod message')
 						modmail_commands(reply, subreddit)
 
 def modmail_commands(message, subreddit):
@@ -68,76 +61,77 @@ def modmail_commands(message, subreddit):
 	command_finder = re.compile(ur'^!(ShadowBan|Ban|Summary) ([-_A-Za-z0-9]{3,20})\s?[\'"]?(.*?)[\'"]?$', re.MULTILINE | re.IGNORECASE)
 	matches = re.findall(command_finder, message.body)
 
-	if matches != None:
-		print('[' + eval(bot.ts) + '] Found matches')
-		for command in matches:
-			print('[' + eval(bot.ts) + '] Running command')
-			if command[0].lower() == 'shadowban':
-				print('[' + eval(bot.ts) + '] Found a shadowban command')
-				try:
-					wiki_additions += ', ' + command[1]
+	for command in matches:
+		if command[0].lower() == 'shadowban':
+			try:
+				wiki_additions += ', ' + command[1]
 
-					if command[2] == '':
-						message.reply('User ' + command[1] + ' has been shadowbanned.')
-						update_automod = True
-					else:
-						message.reply('User **' + command[1] + '** has been shadowbanned for *' + command[2] + '*.')
-						update_automod = True
-
-					print('[' + eval(bot.ts) + '] ' + command[1] + ' ShadowBanned')
-				except:
-					logging.info('[' + eval(bot.ts) + '] Error while responding to shadowban command for ' + command[1])
-
-			elif command[0].lower() == 'ban':
 				if command[2] == '':
-					message.reply('The Ban command is not yet implemented.\n\n**Debug:**\n\n    User: ' + command[1])
+					message.reply('User ' + command[1] + ' has been shadowbanned.')
+					update_automod = True
 				else:
-					message.reply('The Ban command is not yet implemented.\n\n**Debug:**\n\n    User: ' + command[1] + '\n    Reason: ' + command [2])
+					message.reply('User **' + command[1] + '** has been shadowbanned for *' + command[2] + '*.')
+					update_automod = True
 
-			elif command[0].lower() == 'summary':
-				if command[2] == '':
-					try:
-						usernotes = bot.r.get_wiki_page(subreddit, 'usernotes')
-						unesc_usernotes = parser.unescape(usernotes.content_md)
-						json_notes = json.loads(unesc_usernotes)
+				print('[' + eval(bot.ts) + '] ' + command[1] + ' ShadowBanned')
+			except:
+				logging.info('[' + eval(bot.ts) + '] Error while responding to shadowban command for ' + command[1])
 
-						moderators = json_notes['constants']['users']
-						warnings = json_notes['constants']['warnings']
+		elif command[0].lower() == 'ban':
+			if command[2] == '':
+				message.reply('The Ban command is not yet implemented.\n\n**Debug:**\n\n    User: ' + command[1])
+			else:
+				message.reply('The Ban command is not yet implemented.\n\n**Debug:**\n\n    User: ' + command[1] + '\n    Reason: ' + command [2])
 
-						bot_reply = ''
+		elif command[0].lower() == 'summary':
+			if command[2] == '':
+				try:
+					usernotes = bot.r.get_wiki_page(subreddit, 'usernotes')
+					unesc_usernotes = parser.unescape(usernotes.content_md)
+					json_notes = json.loads(unesc_usernotes)
 
-						try: #Usernotes
-							notes = json_notes['users'][command[1]]['ns']
+					moderators = json_notes['constants']['users']
+					warnings = json_notes['constants']['warnings']
 
-							bot_reply += '**User Report: ' + command[1] + '**\n---\n\nWarning | Reason | Moderator\n---|---|----\n'
+					bot_reply = ''
 
-							for note in notes:
-								bot_reply += warnings[note['w']] + ' | ' + note['n'] + ' | ' + moderators[note['m']] + '\n'
-						except KeyError:
-							print('[' + eval(bot.ts) + '] Could not find user ' + command[1] + ' in usernotes')
+					try: #Usernotes
+						notes = json_notes['users'][command[1]]['ns']
 
-						comments = []
+						bot_reply += '**User Report: ' + command[1] + '**\n---\n\nWarning | Reason | Moderator\n---|---|----\n'
 
-						try: #Comments
-							user = bot.r.get_redditor(command[1])
+						for note in notes:
+							bot_reply += warnings[note['w']] + ' | ' + note['n'] + ' | ' + moderators[note['m']] + '\n'
+					except KeyError:
+						print('[' + eval(bot.ts) + '] Could not find user ' + command[1] + ' in usernotes')
 
-							for comment in user.get_comments(limit=100):
-								if comment.subreddit == subreddit:
-									comments.append(comment)
+					content = []
 
-								if len(comments) > 30:
-									break
+					try: #Comments and submissions
+						user = bot.r.get_redditor(command[1])
 
-							comments.sort(key=lambda x: x.score, reverse=False)
+						for comment in user.get_comments(limit=100):
+							if comment.subreddit == subreddit:
+								content.append(comment)
 
-							#Cut down to bottom 10 comments
-							while len(comments) > 10:
-								del comments[10]
+							if len(content) > 30:
+								break
 
-							bot_reply += '\n\nLink | Comment | Score\n---|---|----\n'
+						for submitted in user.get_submitted(limit=20):
+							if submitted.subreddit == subreddit:
+								content.append(submitted)						
 
-							for comment in comments:
-								temp_comment = comment.body.replace('\n', ' ')
+						content.sort(key=lambda x: x.score, reverse=False)
+
+						#Cut down to bottom 10 content
+						while len(content) > 12:
+							del content[12]
+
+						bot_reply += '\n\n[**User Page**](http://reddit.com/user/' + command[1] + ')\n\nLink | Body/Title | Score\n---|---|----\n'
+
+						for content_object in content:
+							if type(content_object) == praw.objects.Comment:
+								temp_comment = content_object.body.replace('\n', ' ')
 
 								#Cut down comments to 200 characters, while extending over the 200 char limit
 								#to preserve markdown links
@@ -145,11 +139,11 @@ def modmail_commands(message, subreddit):
 									i = 200
 									increment = -1
 
-									found = False
+									link = False
 
 									while i > -1 and (i + 1) < len(temp_comment):
 										if temp_comment[i] == ')':
-											found = True
+											link = True
 											break
 
 										if temp_comment[i] == '(':
@@ -162,48 +156,57 @@ def modmail_commands(message, subreddit):
 
 									i += 1
 									
-									if i < 200 or found == False:
+									if i < 200 or link == False:
 										i = 200
 
 									temp_comment = temp_comment[:i]
 
-									if (i + 1) > len(temp_comment):
+									if i >= len(temp_comment):
 										temp_comment += '...'
 
-								bot_reply += '[Comment](' + comment.permalink + ') | ' + temp_comment + ' | ' + str(comment.score) + '\n'
+								if content_object.banned_by == None:
+									bot_reply += '[Comment](' + content_object.permalink + ') | ' + temp_comment + ' | ' + str(content_object.score) + '\n'
+								else:
+									bot_reply += '[**Comment**](' + content_object.permalink + ') | ' + temp_comment + ' | ' + str(content_object.score) + '\n'
 
-						except:
-							logging.info('[' + eval(bot.ts) + '] Error while trying to read user comments')
-
-						message.reply(bot_reply)
-						print('[' + eval(bot.ts) + '] Summary on ' + command[1] + ' provided')
+							if type(content_object) == praw.objects.Submission:
+								if content_object.banned_by == None:
+									bot_reply += '[Submission](' + content_object.permalink + ') | ' + content_object.title + ' | ' + str(content_object.score) + '\n'
+								else:
+									bot_reply += '[**Submission**](' + content_object.permalink + ') | ' + content_object.title + ' | ' + str(content_object.score) + '\n'
 
 					except:
-						message.reply('**Error**:\n\nError while providing summary')
-						logging.info('[' + eval(bot.ts) + '] Error while trying to give summary on ' + command[1])
+						logging.info('[' + eval(bot.ts) + '] Error while trying to read user comments')
 
-				else:
-					message.reply('**Syntax Error**:\n\n    !Summary username')
+					message.reply(bot_reply)
+					print('[' + eval(bot.ts) + '] Summary on ' + command[1] + ' provided')
+
+				except:
+					message.reply('**Error**:\n\nError while providing summary')
+					logging.info('[' + eval(bot.ts) + '] Error while trying to give summary on ' + command[1])
 
 			else:
-				message.reply('**Unknown Command:**\n\n    !' + command[0])
+				message.reply('**Syntax Error**:\n\n    !Summary username')
 
-			#End of command parsing
+		else:
+			message.reply('**Unknown Command:**\n\n    !' + command[0])
 
-		if update_automod: #If necessary apply all recent changes to automoderator configuration page
-			try:
-				automod_config = bot.r.get_wiki_page(subreddit, 'automoderator')
-				unesc_wiki = parser.unescape(automod_config.content_md)
-				new_content = unesc_wiki.replace('do_not_remove', 'do_not_remove' + wiki_additions)
+		#End of command parsing
 
-				bot.r.edit_wiki_page(subreddit, 'automoderator', new_content, str(message.author) + ': Shadowbanning ' + wiki_additions[2:])
+	if update_automod: #If necessary apply all recent changes to automoderator configuration page
+		try:
+			automod_config = bot.r.get_wiki_page(subreddit, 'automoderator')
+			unesc_wiki = parser.unescape(automod_config.content_md)
+			new_content = unesc_wiki.replace('do_not_remove', 'do_not_remove' + wiki_additions)
 
-				bot.r.send_message('AutoModerator', subreddit.display_name, 'update')
+			bot.r.edit_wiki_page(subreddit, 'automoderator', new_content, str(message.author) + ': Shadowbanning ' + wiki_additions[2:])
 
-				print('[' + eval(bot.ts) + '] Updated AutoModerator wiki page')
-			except:
-				logging.info('[' + eval(bot.ts) + '] Error while updating AutoModerator wiki page')
-				print('[' + eval(bot.ts) + '] Error while updating AutoModerator wiki page')
+			bot.r.send_message('AutoModerator', subreddit.display_name, 'update')
+
+			print('[' + eval(bot.ts) + '] Updated AutoModerator wiki page')
+		except:
+			logging.info('[' + eval(bot.ts) + '] Error while updating AutoModerator wiki page')
+			print('[' + eval(bot.ts) + '] Error while updating AutoModerator wiki page')
 
 def main():
 	logging.basicConfig(filename='teaBot.log',level=logging.DEBUG)
