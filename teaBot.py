@@ -74,19 +74,19 @@ def modmail_commands(message, subreddit):
 			print('[' + eval(bot.ts) + '] Running command')
 			if command[0].lower() == 'shadowban':
 				print('[' + eval(bot.ts) + '] Found a shadowban command')
-				#try:
-				wiki_additions += ', ' + command[1]
+				try:
+					wiki_additions += ', ' + command[1]
 
-				if command[2] == '':
-					message.reply('User ' + command[1] + ' has been shadowbanned.')
-					update_automod = True
-				else:
-					message.reply('User **' + command[1] + '** has been shadowbanned for *' + command[2] + '*.')
-					update_automod = True
+					if command[2] == '':
+						message.reply('User ' + command[1] + ' has been shadowbanned.')
+						update_automod = True
+					else:
+						message.reply('User **' + command[1] + '** has been shadowbanned for *' + command[2] + '*.')
+						update_automod = True
 
-				print('[' + eval(bot.ts) + '] ' + command[1] + ' ShadowBanned')
-				#except:
-					#logging.info('[' + eval(bot.ts) + '] Error while responding to shadowban command for ' + command[1])
+					print('[' + eval(bot.ts) + '] ' + command[1] + ' ShadowBanned')
+				except:
+					logging.info('[' + eval(bot.ts) + '] Error while responding to shadowban command for ' + command[1])
 
 			elif command[0].lower() == 'ban':
 				if command[2] == '':
@@ -96,91 +96,91 @@ def modmail_commands(message, subreddit):
 
 			elif command[0].lower() == 'summary':
 				if command[2] == '':
-					#try:
-					usernotes = bot.r.get_wiki_page(subreddit, 'usernotes')
-					unesc_usernotes = parser.unescape(usernotes.content_md)
-					json_notes = json.loads(unesc_usernotes)
+					try:
+						usernotes = bot.r.get_wiki_page(subreddit, 'usernotes')
+						unesc_usernotes = parser.unescape(usernotes.content_md)
+						json_notes = json.loads(unesc_usernotes)
 
-					moderators = json_notes['constants']['users']
-					warnings = json_notes['constants']['warnings']
+						moderators = json_notes['constants']['users']
+						warnings = json_notes['constants']['warnings']
 
-					bot_reply = ''
+						bot_reply = ''
 
-					try: #Usernotes
-						notes = json_notes['users'][command[1]]['ns']
+						try: #Usernotes
+							notes = json_notes['users'][command[1]]['ns']
 
-						bot_reply += '**User Report: ' + command[1] + '**\n---\n\nWarning | Reason | Moderator\n---|---|----\n'
+							bot_reply += '**User Report: ' + command[1] + '**\n---\n\nWarning | Reason | Moderator\n---|---|----\n'
 
-						for note in notes:
-							bot_reply += warnings[note['w']] + ' | ' + note['n'] + ' | ' + moderators[note['m']] + '\n'
-					except KeyError:
-						print('[' + eval(bot.ts) + '] Could not find user ' + command[1] + ' in usernotes')
+							for note in notes:
+								bot_reply += warnings[note['w']] + ' | ' + note['n'] + ' | ' + moderators[note['m']] + '\n'
+						except KeyError:
+							print('[' + eval(bot.ts) + '] Could not find user ' + command[1] + ' in usernotes')
 
-					comments = []
+						comments = []
 
-					#try: #Comments
-					user = bot.r.get_redditor(command[1])
+						try: #Comments
+							user = bot.r.get_redditor(command[1])
 
-					for comment in user.get_comments(limit=100):
-						if comment.subreddit == subreddit:
-							comments.append(comment)
+							for comment in user.get_comments(limit=100):
+								if comment.subreddit == subreddit:
+									comments.append(comment)
 
-						if len(comments) > 30:
-							break
-
-					comments.sort(key=lambda x: x.score, reverse=False)
-
-					#Cut down to bottom 10 comments
-					while len(comments) > 10:
-						del comments[10]
-
-					bot_reply += '\n\nLink | Comment | Score\n---|---|----\n'
-
-					for comment in comments:
-						temp_comment = comment.body.replace('\n', ' ')
-
-						#Cut down comments to 200 characters, while extending over the 200 char limit
-						#to preserve markdown links
-						if len(temp_comment) > 200:
-							i = 200
-							increment = -1
-
-							found = False
-
-							while i > -1 and (i + 1) < len(temp_comment):
-								if temp_comment[i] == ')':
-									found = True
+								if len(comments) > 30:
 									break
 
-								if temp_comment[i] == '(':
-									if temp_comment[i - 1] == ']':
-										increment = 1
-									else:
-										break
+							comments.sort(key=lambda x: x.score, reverse=False)
 
-								i += increment
+							#Cut down to bottom 10 comments
+							while len(comments) > 10:
+								del comments[10]
 
-							i += 1
-							
-							if i < 200 or found == False:
-								i = 200
+							bot_reply += '\n\nLink | Comment | Score\n---|---|----\n'
 
-							temp_comment = temp_comment[:i]
+							for comment in comments:
+								temp_comment = comment.body.replace('\n', ' ')
 
-							if (i + 1) > len(temp_comment):
-								temp_comment += '...'
+								#Cut down comments to 200 characters, while extending over the 200 char limit
+								#to preserve markdown links
+								if len(temp_comment) > 200:
+									i = 200
+									increment = -1
 
-						bot_reply += '[Comment](' + comment.permalink + ') | ' + temp_comment + ' | ' + str(comment.score) + '\n'
+									found = False
 
-					#except:
-						#logging.info('[' + eval(bot.ts) + '] Error while trying to read user comments')
+									while i > -1 and (i + 1) < len(temp_comment):
+										if temp_comment[i] == ')':
+											found = True
+											break
 
-					message.reply(bot_reply)
-					print('[' + eval(bot.ts) + '] Summary on ' + command[1] + ' provided')
+										if temp_comment[i] == '(':
+											if temp_comment[i - 1] == ']':
+												increment = 1
+											else:
+												break
 
-					#except:
-						#message.reply('**Error**:\n\nError while providing summary')
-						#logging.info('[' + eval(bot.ts) + '] Error while trying to give summary on ' + command[1])
+										i += increment
+
+									i += 1
+									
+									if i < 200 or found == False:
+										i = 200
+
+									temp_comment = temp_comment[:i]
+
+									if (i + 1) > len(temp_comment):
+										temp_comment += '...'
+
+								bot_reply += '[Comment](' + comment.permalink + ') | ' + temp_comment + ' | ' + str(comment.score) + '\n'
+
+						except:
+							logging.info('[' + eval(bot.ts) + '] Error while trying to read user comments')
+
+						message.reply(bot_reply)
+						print('[' + eval(bot.ts) + '] Summary on ' + command[1] + ' provided')
+
+					except:
+						message.reply('**Error**:\n\nError while providing summary')
+						logging.info('[' + eval(bot.ts) + '] Error while trying to give summary on ' + command[1])
 
 				else:
 					message.reply('**Syntax Error**:\n\n    !Summary username')
@@ -230,11 +230,11 @@ def main():
 		sys.exit('Subreddit info fetch error')
 	
 	while True:
-		#try:
-		check_modmail(eli_five)
-		#except:
-			#logging.info('[' + eval(bot.ts) + '] Error in modmail section')
-			#print('[' + eval(bot.ts) + '] Error caught by main while loop')
+		try:
+			check_modmail(eli_five)
+		except:
+			logging.info('[' + eval(bot.ts) + '] Error in modmail section')
+			print('[' + eval(bot.ts) + '] Error caught by main while loop')
 
 		time.sleep(1)
 
