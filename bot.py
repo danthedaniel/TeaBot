@@ -2,7 +2,7 @@ import praw
 
 username = ''
 password = ''
-version = 'v0.4.3'
+version = 'v0.5.0'
 subreddit = ''
 
 ts = 'time.ctime(int(time.time()))'

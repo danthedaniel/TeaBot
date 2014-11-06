@@ -11,7 +11,29 @@ from HTMLParser import HTMLParser
 
 import bot     #Stores bot config
 
-cache_timouts = {'modmail': 0, 'new': 0}
+cache_timouts = {'modmail': 0, 'inbox': 0, 'automoderator_wiki': 0, 'usernotes_wiki': 0}
+
+#Subreddit parameter is required to check for moderators
+def check_pms(subreddit):
+	global cache_timouts
+
+	parser = HTMLParser()
+
+	if (time.time() - cache_timouts['inbox']) > bot.r.config.cache_timeout + 1:
+		cache_timouts['inbox'] = time.time()
+
+		for message in bot.r.get_unread(limit=None):		
+			#Perform checks on top level message			
+			if message.new == True:
+				message.mark_as_read()
+
+				if str(message.author) == 'AutoModerator':
+					unesc_body = parser.unescape(message.body)
+
+					bot.r.send_message('/r/' + str(subreddit), 'AutoModerator Response', unesc_body)
+
+				elif message.author in subreddit.get_moderators():
+					message_commands(message, subreddit, False)
 
 def check_modmail(subreddit):
 	global cache_timouts
@@ -42,7 +64,7 @@ def check_modmail(subreddit):
 					print('[' + eval(bot.ts) + '] Sent modmail to ' + str(modmail.author) + ' about accidental ELI5 thread in modmail')
 
 				if modmail.distinguished == 'moderator':
-					modmail_commands(modmail, subreddit)
+					message_commands(modmail, subreddit, True)
 
 			#Perform checks on modmail replies
 			for reply in modmail.replies:
@@ -50,42 +72,66 @@ def check_modmail(subreddit):
 					reply.mark_as_read()
 
 					if reply.distinguished == 'moderator':
-						modmail_commands(reply, subreddit)
+						message_commands(reply, subreddit, True)
 
-def modmail_commands(message, subreddit):
+def message_commands(message, subreddit, ban=False):
+	global cache_timouts
+
 	parser = HTMLParser()
 
 	update_automod = False
 	wiki_additions = ''
 
-	command_finder = re.compile(ur'^!(ShadowBan|Ban|Summary) ([-_A-Za-z0-9]{3,20})\s?[\'"]?(.*?)[\'"]?$', re.MULTILINE | re.IGNORECASE)
+	command_finder = re.compile(ur'^!([^\s].*)$', re.MULTILINE)
 	matches = re.findall(command_finder, message.body)
 
-	for command in matches:
-		if command[0].lower() == 'shadowban':
-			try:
-				wiki_additions += ', ' + command[1]
+	for group in matches:
+		command = group.split(' ')
 
-				if command[2] == '':
-					message.reply('User ' + command[1] + ' has been shadowbanned.')
-					update_automod = True
+		if ban:
+			if command[0].lower() == 'shadowban':
+				try:
+					wiki_additions += ', ' + command[1]
+
+					reason = ' '.join(command[2:])
+
+					if len(command) == 2:
+						message.reply('User **' + command[1] + '** has been shadowbanned.')
+						update_automod = True
+					else:
+						message.reply('User **' + command[1] + '** has been shadowbanned for *' + reason + '*.')
+						update_automod = True
+
+					print('[' + eval(bot.ts) + '] ' + command[1] + ' pending shadowban')
+				except:
+					logging.info('[' + eval(bot.ts) + '] Error while responding to shadowban command for ' + command[1])
+
+			elif command[0].lower() == 'ban':
+				if len(command) == 2:
+					try:
+						user = bot.r.get_redditor(command[1])
+						subreddit.add_ban(user)
+
+						message.reply('User **' + command[1] + '** has been banned')
+					except Exception,e:
+						print('[' + eval(bot.ts) + '] Error while banning ' + command[1] + ': ' + str(e))
+						logging.info('[' + eval(bot.ts) + '] Error while banning ' + command[1] + ': ' + str(e))
 				else:
-					message.reply('User **' + command[1] + '** has been shadowbanned for *' + command[2] + '*.')
-					update_automod = True
+					message.reply('**Syntax Error**:\n\n    !Ban username')
 
-				print('[' + eval(bot.ts) + '] ' + command[1] + ' ShadowBanned')
-			except:
-				logging.info('[' + eval(bot.ts) + '] Error while responding to shadowban command for ' + command[1])
-
-		elif command[0].lower() == 'ban':
-			if command[2] == '':
-				message.reply('The Ban command is not yet implemented.\n\n**Debug:**\n\n    User: ' + command[1])
-			else:
-				message.reply('The Ban command is not yet implemented.\n\n**Debug:**\n\n    User: ' + command[1] + '\n    Reason: ' + command [2])
+		elif ban == False:
+			print('[' + eval(bot.ts) + '] ' + str(message.author) + ' attempted to shadowban/ban when disallowed')
+			logging.info('[' + eval(bot.ts) + '] ' + str(message.author) + ' attempted to shadowban/ban when disallowed')
+			bot.r.send_message('/r/' + str(subreddit), 'Illegal Action', str(message.author) + ' has attempted to shadowban/ban via PM')
 
 		elif command[0].lower() == 'summary':
-			if command[2] == '':
+			if len(command) == 2:
 				try:
+					if (time.time() - cache_timouts['usernotes_wiki']) < bot.r.config.cache_timeout + 1:
+						time.sleep(int(time.time() - cache_timouts['usernotes_wiki']) + 1)
+					
+					cache_timouts['usernotes_wiki'] = time.time()
+
 					usernotes = bot.r.get_wiki_page(subreddit, 'usernotes')
 					unesc_usernotes = parser.unescape(usernotes.content_md)
 					json_notes = json.loads(unesc_usernotes)
@@ -107,6 +153,42 @@ def modmail_commands(message, subreddit):
 
 					content = []
 
+					try: #Shadowban/whitelist check
+						if (time.time() - cache_timouts['automoderator_wiki']) < bot.r.config.cache_timeout + 1:
+							time.sleep(int(time.time() - cache_timouts['automoderator_wiki']) + 1)
+						
+						cache_timouts['automoderator_wiki'] = time.time()
+
+						automod_config = bot.r.get_wiki_page(subreddit, 'automoderator')
+						unesc_wiki = parser.unescape(automod_config.content_md)
+
+						wiki_lines = unesc_wiki.split('\n')
+
+						shadowban_line = wiki_lines.index('    #$ELI5BOT$ SHADOWBANS') + 1
+						shadowbans = wiki_lines[shadowban_line]
+
+						user_pattern = re.compile(ur'([-_A-Za-z0-9]{3,20})[,\]]')
+						usernames = re.findall(user_pattern, shadowbans)
+
+						if lower(command[1]) in [x.lower() for x in usernames]:
+							bot_reply += '**Shadowbanned**: True\n\n'
+						else:
+							bot_reply += '**Shadowbanned**: False\n\n'
+
+						whitelist_line = wiki_lines.index('    #$ELI5BOT$ WHITELIST') + 2
+						whitelists = wiki_lines[shadowban_line]
+
+						usernames = re.findall(user_pattern, whitelists)
+
+						if lower(command[1]) in [x.lower() for x in usernames]:
+							bot_reply += '**Troll Whitelisted**: True\n\n'
+						else:
+							bot_reply += '**Troll Whitelisted**: False\n\n'
+
+					except ValueError:
+						print('[' + eval(bot.ts) + '] Malformed AutoMod wiki')
+						logging.info('[' + eval(bot.ts) + '] Malformed AutoMod wiki (shadowbans/whitelist)')
+
 					try: #Comments and submissions
 						user = bot.r.get_redditor(command[1])
 
@@ -127,7 +209,9 @@ def modmail_commands(message, subreddit):
 						while len(content) > 12:
 							del content[12]
 
-						bot_reply += '\n\n[**User Page**](http://reddit.com/user/' + command[1] + ')\n\nLink | Body/Title | Score\n---|---|----\n'
+						bot_reply += '\n\n[**User Page**](http://reddit.com/user/' + command[1] + ')\n\n'
+
+						bot_reply += 'Link | Body/Title | Score\n---|---|----\n'
 
 						for content_object in content:
 							if type(content_object) == praw.objects.Comment:
@@ -181,9 +265,9 @@ def modmail_commands(message, subreddit):
 					message.reply(bot_reply)
 					print('[' + eval(bot.ts) + '] Summary on ' + command[1] + ' provided')
 
-				except:
+				except Exception,e:
 					message.reply('**Error**:\n\nError while providing summary')
-					logging.info('[' + eval(bot.ts) + '] Error while trying to give summary on ' + command[1])
+					logging.info('[' + eval(bot.ts) + '] Error while trying to give summary on ' + command[1] + ': ' + str(e))
 
 			else:
 				message.reply('**Syntax Error**:\n\n    !Summary username')
@@ -195,6 +279,11 @@ def modmail_commands(message, subreddit):
 
 	if update_automod: #If necessary apply all recent changes to automoderator configuration page
 		try:
+			if (time.time() - cache_timouts['automoderator_wiki']) < bot.r.config.cache_timeout + 1:
+				time.sleep(int(time.time() - cache_timouts['automoderator_wiki']) + 1)
+			
+			cache_timouts['automoderator_wiki'] = time.time()
+
 			automod_config = bot.r.get_wiki_page(subreddit, 'automoderator')
 			unesc_wiki = parser.unescape(automod_config.content_md)
 			new_content = unesc_wiki.replace('do_not_remove', 'do_not_remove' + wiki_additions)
@@ -204,9 +293,9 @@ def modmail_commands(message, subreddit):
 			bot.r.send_message('AutoModerator', subreddit.display_name, 'update')
 
 			print('[' + eval(bot.ts) + '] Updated AutoModerator wiki page')
-		except:
-			logging.info('[' + eval(bot.ts) + '] Error while updating AutoModerator wiki page')
-			print('[' + eval(bot.ts) + '] Error while updating AutoModerator wiki page')
+		except Exception,e:
+			logging.info('[' + eval(bot.ts) + '] Error while updating AutoModerator wiki page: ' + str(e))
+			print('[' + eval(bot.ts) + '] Error while updating AutoModerator wiki page: ' + str(e))
 
 def main():
 	logging.basicConfig(filename='teaBot.log',level=logging.DEBUG)
@@ -224,7 +313,7 @@ def main():
 	
 	try:
 		#Connects the bot to explainlikeimfive
-		eli_five = bot.r.get_subreddit(bot.subreddit)
+		subreddit = bot.r.get_subreddit(bot.subreddit)
 		
 		logging.info('[' + eval(bot.ts) + '] Successfully obtained subreddit information for ' + bot.subreddit)
 		print('[' + eval(bot.ts) + '] Connected to ' + bot.subreddit)
@@ -234,10 +323,16 @@ def main():
 	
 	while True:
 		try:
-			check_modmail(eli_five)
-		except:
-			logging.info('[' + eval(bot.ts) + '] Error in modmail section')
-			print('[' + eval(bot.ts) + '] Error caught by main while loop')
+			check_modmail(subreddit)
+		except Exception,e:
+			logging.info('[' + eval(bot.ts) + '] Error in modmail section: ' + str(e))
+			print('[' + eval(bot.ts) + '] Error in modmail section: ' + str(e))
+
+		try:
+			check_pms(subreddit)
+		except Exception,e:
+			logging.info('[' + eval(bot.ts) + '] Error in PM section: ' + str(e))
+			print('[' + eval(bot.ts) + '] Error in PM section: ' + str(e))
 
 		time.sleep(1)
 
