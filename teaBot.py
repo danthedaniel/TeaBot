@@ -120,12 +120,20 @@ def message_commands(message, subreddit, ban=False):
 					message.reply('**Syntax Error**:\n\n    !Ban username')
 
 		elif ban == False:
+<<<<<<< HEAD
 			if command[0].lower() == 'shadowban' or command[0].lower() == 'ban':
 				print('[' + eval(bot.ts) + '] ' + str(message.author) + ' attempted to shadowban/ban when disallowed')
 				logging.info('[' + eval(bot.ts) + '] ' + str(message.author) + ' attempted to shadowban/ban when disallowed')
 				bot.r.send_message('/r/' + str(subreddit), 'Illegal Action', str(message.author) + ' has attempted to shadowban/ban via PM')
 
 		if command[0].lower() == 'summary':
+=======
+			print('[' + eval(bot.ts) + '] ' + str(message.author) + ' attempted to shadowban/ban when disallowed')
+			logging.info('[' + eval(bot.ts) + '] ' + str(message.author) + ' attempted to shadowban/ban when disallowed')
+			bot.r.send_message('/r/' + str(subreddit), 'Illegal Action', str(message.author) + ' has attempted to shadowban/ban via PM')
+
+		elif command[0].lower() == 'summary':
+>>>>>>> origin/master
 			if len(command) == 2:
 				try:
 					if (time.time() - cache_timouts['usernotes_wiki']) < bot.r.config.cache_timeout + 1:
