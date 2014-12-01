@@ -1,0 +1,12 @@
+[teaBot credentials]
+username=
+password=
+
+[ModTeam credentials]
+username=
+password=
+
+[General]
+version=0.7.6
+subreddit=
+useragent=LittleTeaBot for %(subreddit)s/%(version)s by teaearlgraycold
