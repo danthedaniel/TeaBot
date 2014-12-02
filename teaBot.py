@@ -27,6 +27,8 @@ class TeaBot:
 
         del config
 
+        self.parser = HTMLParser()
+
         self.cache_timeouts = {'modmail': 0, 'inbox': 0, 'automoderator_wiki': 0, 'usernotes_wiki': 0, 'stylesheet': 0}
         self.message_backlog = []
 
@@ -41,8 +43,6 @@ class TeaBot:
 
     #Subreddit parameter is required to check for moderators
     def check_pms(self):
-        parser = HTMLParser()
-
         if (time.time() - self.cache_timeouts['inbox']) > self.r.config.cache_timeout + 1:
             self.cache_timeouts['inbox'] = time.time()
 
@@ -51,7 +51,7 @@ class TeaBot:
                     message.mark_as_read()
 
                     if message.author.name == 'AutoModerator':
-                        unesc_body = parser.unescape(message.body)
+                        unesc_body = self.parser.unescape(message.body)
 
                         if message.subject == 'AutoModerator conditions updated':
                             update_message = self.message_backlog[-1].reply(unesc_body)
@@ -65,8 +65,6 @@ class TeaBot:
                         #self.message_commands(message, self.subreddit)
 
     def check_modmail(self):
-        parser = HTMLParser()
-
         sub_prefix = re.compile(ur'^[\[\()]?eli[5f]\s?[:-\]\)]?\s?', re.IGNORECASE)
         report_check = re.compile(ur'report', re.IGNORECASE)
 
@@ -80,8 +78,8 @@ class TeaBot:
 
                     if report_check.search(modmail.subject) == None and sub_prefix.search(modmail.subject) != None and len(modmail.subject) > 6:
                         #Make certain that the text can be put into a url/markdown code safely
-                        unesc_subject = parser.unescape(modmail.subject)
-                        unesc_body = parser.unescape(modmail.body)
+                        unesc_subject = self.parser.unescape(modmail.subject)
+                        unesc_body = self.parser.unescape(modmail.body)
                         
                         safe_subject = urllib.quote_plus(unesc_subject.encode('utf-8'))
                         safe_body = urllib.quote_plus(unesc_body.encode('utf-8'))
@@ -101,10 +99,9 @@ class TeaBot:
                             self.message_commands(reply)
 
     def message_commands(self, message):
-        parser = HTMLParser()
-
-        url_verifier = re.compile(ur'(https?://(?:www.)?reddit.com/r/' + self.subreddit.display_name + ur'/comments/([A-Za-z\d]{6})/[^\s]+/([A-Za-z\d]{7})?)')
+        url_verifier   = re.compile(ur'(https?://(?:www.)?reddit.com/r/' + self.subreddit.display_name + ur'/comments/([A-Za-z\d]{6})/[^\s]+/([A-Za-z\d]{7})?)')
         comment_finder = re.compile(ur'---\n\n?([\S\s]*?)\n\n?---') #For cutting lock/sticky messages out of commands
+        command_finder = re.compile(ur'^!([^\s].*)$', re.MULTILINE)
 
         #Used for shadowbanning and locking
         automod_jobs = []
@@ -121,8 +118,6 @@ class TeaBot:
         usernotes_jobs.append([]) #Username
         usernotes_jobs.append([]) #Reason - optional
         usernotes_jobs.append([]) #Link - optional needs to be pre-formatted
-
-        command_finder = re.compile(ur'^!([^\s].*)$', re.MULTILINE)
         matches = re.findall(command_finder, message.body)
 
         for group in matches:
@@ -137,18 +132,18 @@ class TeaBot:
             elif command[0].lower() == 'sticky':
                 self.do_sticky(message, command, url_verifier, comment_finder)
             elif command[0].lower() == 'summary':
-                self.do_summary(message, command, parser)
+                self.do_summary(message, command)
             else:
                 message.reply('**Unknown Command:**\n\n    !' + command[0])
 
             #End of command parsing
 
         if len(automod_jobs[0]) > 0: #If necessary apply all recent changes to automoderator configuration page
-            self.apply_automod_jobs(message, automod_jobs, parser)
+            self.apply_automod_jobs(message, automod_jobs)
         if len(usernotes_jobs[0]) > 0:
-            self.apply_usernotes_jobs(message, usernotes_jobs, parser)
+            self.apply_usernotes_jobs(message, usernotes_jobs)
         if len(stylesheet_jobs[0]) > 0:
-            self.apply_stylesheet_jobs(message, stylesheet_jobs, parser)
+            self.apply_stylesheet_jobs(message, stylesheet_jobs)
 
     def printlog(self, logmessage):
         logging.info('[' + time.ctime(int(time.time())) + '] ' + logmessage)
@@ -307,7 +302,7 @@ class TeaBot:
         else:
             message.reply('**Syntax Error**:\n\n    !sticky title|link\n    ---\n    Post Body\n    ---')
 
-    def do_summary(self, message, command, parser):
+    def do_summary(self, message, command):
         if len(command) > 1:
             try:
                 if (time.time() - self.cache_timeouts['usernotes_wiki']) < self.r.config.cache_timeout + 1:
@@ -316,7 +311,7 @@ class TeaBot:
                 self.cache_timeouts['usernotes_wiki'] = time.time()
 
                 usernotes = self.r.get_wiki_page(self.subreddit, 'usernotes')
-                unesc_usernotes = parser.unescape(usernotes.content_md)
+                unesc_usernotes = self.parser.unescape(usernotes.content_md)
                 json_notes = json.loads(unesc_usernotes)
 
                 moderators = json_notes['constants']['users']
@@ -440,14 +435,14 @@ class TeaBot:
         else:
             message.reply('**Syntax Error**:\n\n    !Summary username')            
     
-    def apply_automod_jobs(self, message, automod_jobs, parser):
+    def apply_automod_jobs(self, message, automod_jobs):
         if (time.time() - self.cache_timeouts['automoderator_wiki']) < self.r.config.cache_timeout + 1:
             time.sleep(int(time.time() - self.cache_timeouts['automoderator_wiki']))
         
         self.cache_timeouts['automoderator_wiki'] = time.time()
 
         automod_config = self.r.get_wiki_page(self.subreddit, 'automoderator')
-        new_content = parser.unescape(automod_config.content_md)
+        new_content = self.parser.unescape(automod_config.content_md)
 
         for x in range(len(automod_jobs[0])):
             if automod_jobs[0][x] == 'shadowban':
@@ -477,14 +472,14 @@ class TeaBot:
         except Exception,e:
             self.printlog('Error while updating AutoModerator wiki page: ' + str(e))
 
-    def apply_usernotes_jobs(self, message, usernotes_jobs, parser):
+    def apply_usernotes_jobs(self, message, usernotes_jobs):
         if (time.time() - self.cache_timeouts['usernotes_wiki']) < self.r.config.cache_timeout + 1:
             time.sleep(int(time.time() - self.cache_timeouts['usernotes_wiki']))
         
         self.cache_timeouts['usernotes_wiki'] = time.time()
 
         usernotes_page = self.r.get_wiki_page(self.subreddit, 'usernotes')
-        content = parser.unescape(usernotes_page.content_md)
+        content = self.parser.unescape(usernotes_page.content_md)
 
         notes = json.loads(content)
 
@@ -529,14 +524,14 @@ class TeaBot:
 
         self.printlog('Added shadowban notice to usernotes for ' + username)
 
-    def apply_stylesheet_jobs(self, message, stylesheet_jobs, parser):
+    def apply_stylesheet_jobs(self, message, stylesheet_jobs):
         if (time.time() - self.cache_timeouts['stylesheet']) < self.r.config.cache_timeout + 1:
             time.sleep(int(time.time() - self.cache_timeouts['stylesheet']))
 
         self.cache_timeouts['stylesheet'] = time.time()
 
         stylesheet = self.r.get_stylesheet(self.subreddit)
-        new_content = parser.unescape(stylesheet['stylesheet'])
+        new_content = self.parser.unescape(stylesheet['stylesheet'])
 
         for x in range(len(stylesheet_jobs[0])):
             if stylesheet_jobs[0][x] == 'lock_sticky':
