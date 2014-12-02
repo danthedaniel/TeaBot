@@ -109,7 +109,7 @@ class TeaBot:
         #Used for shadowbanning and locking
         automod_jobs = []
         automod_jobs.append([]) #Type
-        automod_jobs.append([]) #Data
+        automod_jobs.append([]) #Data - username, thread id
 
         #Used for stickying lock reason comments
         stylesheet_jobs = []
@@ -129,26 +129,26 @@ class TeaBot:
             command = group.split(' ')
 
             if command[0].lower() == 'shadowban':
-                self.do_shadowban(self, message, command, automod_jobs, usernotes_jobs, url_verifier)
+                self.do_shadowban(message, command, automod_jobs, usernotes_jobs, url_verifier)
             elif command[0].lower() == 'ban':
-                self.do_ban(self, message, command)
+                self.do_ban(message, command)
             elif command[0].lower() == 'lock':
-                self.dolock(self, message, command, automod_jobs, stylesheet_jobs, url_verifier, comment_finder)
+                self.dolock(message, command, automod_jobs, stylesheet_jobs, url_verifier, comment_finder)
             elif command[0].lower() == 'sticky':
-                self.do_sticky(self, message, command, url_verifier, comment_finder)
+                self.do_sticky(message, command, url_verifier, comment_finder)
             elif command[0].lower() == 'summary':
-                self.do_summary(self, message, command, parser)
+                self.do_summary(message, command, parser)
             else:
                 message.reply('**Unknown Command:**\n\n    !' + command[0])
 
             #End of command parsing
 
         if len(automod_jobs[0]) > 0: #If necessary apply all recent changes to automoderator configuration page
-            self.apply_automod_jobs(self, message, automod_jobs, parser)
+            self.apply_automod_jobs(message, automod_jobs, parser)
         if len(usernotes_jobs[0]) > 0:
-            self.apply_usernotes_jobs(self, message, usernotes_jobs, parser)
+            self.apply_usernotes_jobs(message, usernotes_jobs, parser)
         if len(stylesheet_jobs[0]) > 0:
-            self.apply_stylesheet_jobs(self, message, stylesheet_jobs, parser)
+            self.apply_stylesheet_jobs(message, stylesheet_jobs, parser)
 
     def printlog(self, logmessage):
         logging.info('[' + time.ctime(int(time.time())) + '] ' + logmessage)
@@ -459,7 +459,7 @@ class TeaBot:
         try:
             if len(automod_jobs[0]) == 1:
                 if automod_jobs[0][0] == 'shadowban':
-                    reason = message.author.name + ': Shadowbanning ' + automod_jobs[1][0] + ' for ' + shadowban_reason
+                    reason = message.author.name + ': Shadowbanning ' + automod_jobs[1][0]
 
                 elif automod_jobs[0][0] == 'lock':
                     reason = message.author.name + ': Locking ' + automod_jobs[1][0]
