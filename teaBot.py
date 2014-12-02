@@ -297,17 +297,17 @@ class TeaBot:
                         moderators = json_notes['constants']['users']
                         warnings = json_notes['constants']['warnings']
 
-                        self.reply = ''
+                        bot_reply = ''
 
                         user = self.r.get_redditor(command[1])
 
                         deltaT = int(time.time() - user.created_utc)
-                        self.reply += '**User Report:** [/u/' + user.name + '](http://reddit.com/user/' + user.name + ') - Age: ' + str(datetime.timedelta(0, deltaT)) + '\n\n'
+                        bot_reply += '**User Report:** [/u/' + user.name + '](http://reddit.com/user/' + user.name + ') - Age: ' + str(datetime.timedelta(0, deltaT)) + '\n\n'
 
                         try: #Usernotes
                             notes = json_notes['users'][user.name]['ns']
 
-                            self.reply += '---\n\nWarning | Reason | Moderator\n---|---|----\n'
+                            bot_reply += '---\n\nWarning | Reason | Moderator\n---|---|----\n'
 
                             for note in notes:
                                 permalink = ''
@@ -327,34 +327,34 @@ class TeaBot:
                                         pass
 
                                 if permalink == '':
-                                    self.reply += warnings[note['w']] + ' | ' + note['n'] + ' | ' + moderators[note['m']] + '\n'
+                                    bot_reply += warnings[note['w']] + ' | ' + note['n'] + ' | ' + moderators[note['m']] + '\n'
                                 else:
-                                    self.reply += warnings[note['w']] + ' | [' + note['n'] + '](' + permalink + ') | ' + moderators[note['m']] + '\n'
+                                    bot_reply += warnings[note['w']] + ' | [' + note['n'] + '](' + permalink + ') | ' + moderators[note['m']] + '\n'
 
                         except KeyError:
-                            print('[' + eval(self.ts) + '] Could not find user ' + user.name + ' in usernotes')
+                            self.printlog('Could not find user ' + user.name + ' in usernotes')
 
                         content = []
 
                         try: #Comments and submissions
                             for comment in user.get_comments(limit=100):
-                                if comment.subreddit == subreddit:
+                                if comment.subreddit == self.subreddit:
                                     content.append(comment)
 
                                 if len(content) > 30:
                                     break
 
                             for submitted in user.get_submitted(limit=20):
-                                if submitted.subreddit == subreddit:
+                                if submitted.subreddit == self.subreddit:
                                     content.append(submitted)                        
 
                             content.sort(key=lambda x: x.score, reverse=False)
 
-                            #Cut down to self.om 12 content
+                            #Cut down to bottom 12 content
                             while len(content) > 12:
                                 del content[12]
 
-                            self.reply += '\nLink | Body/Title | Score\n---|---|----\n'
+                            bot_reply += '\nLink | Body/Title | Score\n---|---|----\n'
 
                             for content_object in content:
                                 if type(content_object) == praw.objects.Comment:
@@ -392,21 +392,21 @@ class TeaBot:
                                             temp_comment += '...'
 
                                     if content_object.banned_by == None:
-                                        self.reply += '[Comment](' + content_object.permalink + '?context=3) | ' + temp_comment + ' | ' + str(content_object.score) + '\n'
+                                        bot_reply += '[Comment](' + content_object.permalink + '?context=3) | ' + temp_comment + ' | ' + str(content_object.score) + '\n'
                                     else:
-                                        self.reply += '[**Comment**](' + content_object.permalink + '?context=3) | ' + temp_comment + ' | ' + str(content_object.score) + '\n'
+                                        bot_reply += '[**Comment**](' + content_object.permalink + '?context=3) | ' + temp_comment + ' | ' + str(content_object.score) + '\n'
 
                                 if type(content_object) == praw.objects.Submission:
                                     if content_object.banned_by == None:
-                                        self.reply += '[Submission](' + content_object.permalink + ') | ' + content_object.title + ' | ' + str(content_object.score) + '\n'
+                                        bot_reply += '[Submission](' + content_object.permalink + ') | ' + content_object.title + ' | ' + str(content_object.score) + '\n'
                                     else:
-                                        self.reply += '[**Submission**](' + content_object.permalink + ') | ' + content_object.title + ' | ' + str(content_object.score) + '\n'
+                                        bot_reply += '[**Submission**](' + content_object.permalink + ') | ' + content_object.title + ' | ' + str(content_object.score) + '\n'
 
-                        except:
-                            self.printlog('Error while trying to read user comments')
+                        except Exception,e:
+                            self.printlog('Error while trying to read user comments:' + str(e))
 
-                        message.reply(self.reply)
-                        print('[' + eval(self.ts) + '] Summary on ' + user.name + ' provided')
+                        message.reply(bot_reply)
+                        self.printlog('Summary on ' + user.name + ' provided')
 
                     except Exception,e:
                         message.reply('**Error**:\n\nError while providing summary')
