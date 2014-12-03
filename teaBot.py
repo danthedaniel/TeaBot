@@ -128,7 +128,11 @@ class TeaBot:
             elif command[0].lower() == 'ban':
                 self.do_ban(message, command)
             elif command[0].lower() == 'lock':
+<<<<<<< HEAD
                 self.do_lock(message, command, automod_jobs, stylesheet_jobs, url_verifier, comment_finder)
+=======
+                self.dolock(message, command, automod_jobs, stylesheet_jobs, url_verifier, comment_finder)
+>>>>>>> origin/master
             elif command[0].lower() == 'sticky':
                 self.do_sticky(message, command, url_verifier, comment_finder)
             elif command[0].lower() == 'summary':
