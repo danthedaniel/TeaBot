@@ -12,7 +12,7 @@ from HTMLParser import HTMLParser
 
 class sub_cache:
     def __init__(self, subreddit):
-        self.cache_timeout = {'modmail': 0, 'inbox': 0, 'automoderator_wiki': 0, 'usernotes_wiki': 0, 'stylesheet': 0}
+        self.cache_timeout = {'modmail': 0, 'automoderator_wiki': 0, 'usernotes_wiki': 0, 'stylesheet': 0}
         self.praw = subreddit
 
 class TeaBot:
@@ -32,6 +32,7 @@ class TeaBot:
         self.parser = HTMLParser()
 
         self.message_backlog = []
+        self.inbox_timeout = 0
 
         logging.basicConfig(filename='teaBot.log',level=logging.DEBUG)
 
@@ -50,24 +51,23 @@ class TeaBot:
 
     #Subreddit parameter is required to check for moderators
     def check_pms(self):
-        for subreddit in self.subreddits:
-            if (time.time() - subreddit.cache_timeout['inbox']) > self.r.config.cache_timeout + 1:
-                subreddit.cache_timeout['inbox'] = time.time()
+        if (time.time() - self.inbox_timeout) > self.r.config.cache_timeout + 1:
+            self.inbox_timeout = time.time()
 
-                for message in self.r.get_unread(limit=None):     
-                    if message.new == True:
-                        message.mark_as_read()
+            for message in self.r.get_unread(limit=None):     
+                if message.new == True:
+                    message.mark_as_read()
 
-                        if message.author.name == 'AutoModerator':
-                            unesc_body = self.parser.unescape(message.body)
+                    if message.author.name == 'AutoModerator':
+                        unesc_body = self.parser.unescape(message.body)
 
-                            if message.subject == 'AutoModerator conditions updated':
-                                update_message = self.message_backlog[-1].reply(unesc_body)
-                                #update_message.collapse()
-                                del self.message_backlog[-1]
-                                
-                            else:
-                                self.r.send_message('/r/' + subreddit.praw.display_name, 'AutoModerator Message', unesc_body)
+                        if message.subject == 'AutoModerator conditions updated':
+                            update_message = self.message_backlog[-1].reply(unesc_body)
+                            #update_message.collapse()
+                            del self.message_backlog[-1]
+                            
+                        else:
+                            self.r.send_message('/r/' + subreddit.praw.display_name, 'AutoModerator Message', unesc_body)
 
     def check_modmail(self):
         for subreddit in self.subreddits:
@@ -129,11 +129,11 @@ class TeaBot:
             #End of command parsing
 
         if len(automod_jobs[0]) > 0: #If necessary apply all recent changes to automoderator configuration page
-            self.apply_automod_jobs(message, automod_jobs)
+            self.apply_automod_jobs(subreddit, message, automod_jobs)
         if len(usernotes_jobs[0]) > 0:
-            self.apply_usernotes_jobs(message, usernotes_jobs)
+            self.apply_usernotes_jobs(subreddit, message, usernotes_jobs)
         if len(stylesheet_jobs[0]) > 0:
-            self.apply_stylesheet_jobs(message, stylesheet_jobs)
+            self.apply_stylesheet_jobs(subreddit, message, stylesheet_jobs)
 
     def printlog(self, logmessage):
         logging.info('[' + time.ctime(int(time.time())) + '] ' + logmessage)
