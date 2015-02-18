@@ -57,7 +57,8 @@ class TeaBot:
             for message in self.r.get_unread(limit=None):     
                 if message.new == True:
                     message.mark_as_read()
-
+                    
+                    #Author will be None if a mod invite
                     if message.author.name == 'AutoModerator':
                         unesc_body = self.parser.unescape(message.body)
 
@@ -214,9 +215,8 @@ class TeaBot:
 
                     if comment_matches != None:
                         body_text = comment_matches.groups(0)[0]
-                        message_appendix = '\n\n---\n\n[Here\'s a more general explanation on why threads get locked](http://www.reddit.com/r/explainlikeimfive/comments/1secxi/eli5_why_are_some_threads_locked/)'
 
-                        new_comment = locked_thread.add_comment(body_text + message_appendix)
+                        new_comment = locked_thread.add_comment(body_text)
                         new_comment.distinguish()
 
                         stylesheet_jobs[0].append('lock_sticky')
