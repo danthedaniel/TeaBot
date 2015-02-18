@@ -10,6 +10,11 @@ import ConfigParser
 import urllib  #Used to encode strings for use in URLs
 from HTMLParser import HTMLParser
 
+class sub_cache:
+    def __init__(self, subreddit):
+        self.cache_timeout = {'modmail': 0, 'inbox': 0, 'automoderator_wiki': 0, 'usernotes_wiki': 0, 'stylesheet': 0}
+        self.praw = subreddit
+
 class TeaBot:
     def __init__(self, config_file):
         config = ConfigParser.RawConfigParser()
@@ -18,89 +23,74 @@ class TeaBot:
         self.username  = config.get('teaBot credentials', 'username')
         self.password  = config.get('teaBot credentials', 'password')
 
-        self.modteam   = config.get('ModTeam credentials', 'username')
-        self.modteampw = config.get('ModTeam credentials', 'password')
-
-        version   = config.get('General', 'version')
-        sr_name   = config.get('General', 'subreddit')
+        version        = config.get('General', 'version')
+        sr_list        = config.get('General', 'subreddits').split(',')
         self.useragent = config.get('General', 'useragent')
 
         del config
 
         self.parser = HTMLParser()
 
-        self.cache_timeouts = {'modmail': 0, 'inbox': 0, 'automoderator_wiki': 0, 'usernotes_wiki': 0, 'stylesheet': 0}
         self.message_backlog = []
 
         logging.basicConfig(filename='teaBot.log',level=logging.DEBUG)
 
         self.r = praw.Reddit(user_agent=self.useragent)
         self.r.login(self.username, self.password)
+        self.subreddits = []
 
-        self.subreddit = self.r.get_subreddit(sr_name)
+        #Get subreddits
+        for sr_name in sr_list:
+            self.subreddits.append(sub_cache(self.r.get_subreddit(sr_name)))
 
-        self.printlog('LittleteaBot for ' + sr_name + '/' + version + ' started')
+        self.url_verifier   = re.compile(ur'(https?://(?:www.)?reddit.com/r/\w{3,}/comments/([A-Za-z\d]{6})/[^\s]+/([A-Za-z\d]{7})?)')
+        self.comment_finder = re.compile(ur'---\n\n?([\S\s]*?)\n\n?---') #For cutting lock/sticky messages out of commands
+
+        self.printlog('LittleteaBot/' + version + ' started')
 
     #Subreddit parameter is required to check for moderators
     def check_pms(self):
-        if (time.time() - self.cache_timeouts['inbox']) > self.r.config.cache_timeout + 1:
-            self.cache_timeouts['inbox'] = time.time()
+        for subreddit in self.subreddits:
+            if (time.time() - subreddit.cache_timeout['inbox']) > self.r.config.cache_timeout + 1:
+                subreddit.cache_timeout['inbox'] = time.time()
 
-            for message in self.r.get_unread(limit=None):     
-                if message.new == True:
-                    message.mark_as_read()
+                for message in self.r.get_unread(limit=None):     
+                    if message.new == True:
+                        message.mark_as_read()
 
-                    if message.author.name == 'AutoModerator':
-                        unesc_body = self.parser.unescape(message.body)
+                        if message.author.name == 'AutoModerator':
+                            unesc_body = self.parser.unescape(message.body)
 
-                        if message.subject == 'AutoModerator conditions updated':
-                            update_message = self.message_backlog[-1].reply(unesc_body)
-                            #update_message.collapse()
-                            del self.message_backlog[-1]
-                            
-                        else:
-                            self.r.send_message('/r/' + self.subreddit.display_name, 'AutoModerator Message', unesc_body)
-
-                    #elif message.author in self.subreddit.get_moderators():
-                        #self.message_commands(message, self.subreddit)
+                            if message.subject == 'AutoModerator conditions updated':
+                                update_message = self.message_backlog[-1].reply(unesc_body)
+                                #update_message.collapse()
+                                del self.message_backlog[-1]
+                                
+                            else:
+                                self.r.send_message('/r/' + subreddit.praw.display_name, 'AutoModerator Message', unesc_body)
 
     def check_modmail(self):
-        sub_prefix = re.compile(ur'^[\[\()]?eli[5f]\s?[:-\]\)]?\s?', re.IGNORECASE)
-        report_check = re.compile(ur'report', re.IGNORECASE)
+        for subreddit in self.subreddits:
+            if (time.time() - subreddit.cache_timeout['modmail']) > self.r.config.cache_timeout + 1:
+                subreddit.cache_timeout['modmail'] = time.time()
 
-        if (time.time() - self.cache_timeouts['modmail']) > self.r.config.cache_timeout + 1:
-            self.cache_timeouts['modmail'] = time.time()
+                for modmail in subreddit.praw.get_mod_mail(limit=6):        
+                    #Perform checks on top level modmail            
+                    if modmail.new == True:
+                        modmail.mark_as_read()
 
-            for modmail in self.subreddit.get_mod_mail(limit=6):        
-                #Perform checks on top level modmail            
-                if modmail.new == True:
-                    modmail.mark_as_read()
+                        if modmail.distinguished == 'moderator':
+                            self.message_commands(modmail, subreddit)
 
-                    if report_check.search(modmail.subject) == None and sub_prefix.search(modmail.subject) != None and len(modmail.subject) > 6:
-                        #Make certain that the text can be put into a url/markdown code safely
-                        unesc_subject = self.parser.unescape(modmail.subject)
-                        unesc_body = self.parser.unescape(modmail.body)
-                        
-                        safe_subject = urllib.quote_plus(unesc_subject.encode('utf-8'))
-                        safe_body = urllib.quote_plus(unesc_body.encode('utf-8'))
-                        
-                        modmail.reply('It appears that you have accidentally posted a question in modmail rather than create a new submission.\n\n[Click Here](http://www.reddit.com/r/' + self.subreddit.display_name + '/submit?selftext=true&title=' + safe_subject + '&text=' + safe_body +') to turn this modmail into a submission.\n\nPlease [check our rules for posting](http://reddit.com/r/' + self.subreddit.display_name + '/wiki/rules) while you are at it and make sure your submission is a good fit for ELI5.')
-                        self.printlog('Sent modmail to ' + modmail.author.name + ' about accidental ELI5 thread in modmail')
+                    #Perform checks on modmail replies
+                    for reply in modmail.replies:
+                        if reply.new == True:
+                            reply.mark_as_read()
 
-                    if modmail.distinguished == 'moderator':
-                        self.message_commands(modmail)
+                            if reply.distinguished == 'moderator':
+                                self.message_commands(reply, subreddit)
 
-                #Perform checks on modmail replies
-                for reply in modmail.replies:
-                    if reply.new == True:
-                        reply.mark_as_read()
-
-                        if reply.distinguished == 'moderator':
-                            self.message_commands(reply)
-
-    def message_commands(self, message):
-        url_verifier   = re.compile(ur'(https?://(?:www.)?reddit.com/r/' + self.subreddit.display_name + ur'/comments/([A-Za-z\d]{6})/[^\s]+/([A-Za-z\d]{7})?)')
-        comment_finder = re.compile(ur'---\n\n?([\S\s]*?)\n\n?---') #For cutting lock/sticky messages out of commands
+    def message_commands(self, message, subreddit):
         command_finder = re.compile(ur'^!([^\s].*)$', re.MULTILINE)
 
         #Used for shadowbanning and locking
@@ -124,15 +114,15 @@ class TeaBot:
             command = group.split(' ')
 
             if command[0].lower() == 'shadowban':
-                self.do_shadowban(message, command, automod_jobs, usernotes_jobs, url_verifier)
+                self.do_shadowban(subreddit, message, command, automod_jobs, usernotes_jobs)
             elif command[0].lower() == 'ban':
-                self.do_ban(message, command)
+                self.do_ban(subreddit, message, command)
             elif command[0].lower() == 'lock':
-                self.do_lock(message, command, automod_jobs, stylesheet_jobs, url_verifier, comment_finder)
+                self.do_lock(subreddit, message, command, automod_jobs, stylesheet_jobs)
             elif command[0].lower() == 'sticky':
-                self.do_sticky(message, command, url_verifier, comment_finder)
+                self.do_sticky(subreddit, message, command)
             elif command[0].lower() == 'summary':
-                self.do_summary(message, command)
+                self.do_summary(subreddit, message, command)
             else:
                 message.reply('**Unknown Command:**\n\n    !' + command[0])
 
@@ -149,7 +139,7 @@ class TeaBot:
         logging.info('[' + time.ctime(int(time.time())) + '] ' + logmessage)
         print('[' + time.ctime(int(time.time())) + '] ' + logmessage)
         
-    def do_shadowban(self, message, command, automod_jobs, usernotes_jobs, url_verifier):
+    def do_shadowban(self, subreddit, message, command, automod_jobs, usernotes_jobs):
         try:
             automod_jobs[0].append('shadowban')
             automod_jobs[1].append(command[1]) #username for automod wiki editing
@@ -164,7 +154,7 @@ class TeaBot:
                 message.reply('User [**' + command[1] + '**](http://reddit.com/user/' + command[1] + ') has been shadowbanned.')
                 usernotes_jobs[2].append(link_code)
             else:
-                url_matches = re.search(url_verifier, shadowban_reason)
+                url_matches = re.search(self.url_verifier, shadowban_reason)
 
                 if url_matches != None:
                     permalink  = url_matches.groups(0)[0]
@@ -192,11 +182,11 @@ class TeaBot:
         except:
             self.printlog('Error while responding to shadowban command for ' + command[1])
 
-    def do_ban(self, message, command):
+    def do_ban(self, subreddit, message, command):
         if len(command) == 2:
             try:
                 user = self.r.get_redditor(command[1])
-                self.subreddit.add_ban(user)
+                subreddit.praw.add_ban(user)
 
                 message.reply('User **' + command[1] + '** has been banned')
             except Exception,e:
@@ -204,10 +194,10 @@ class TeaBot:
         else:
             message.reply('**Syntax Error**:\n\n    !Ban username')
             
-    def do_lock(self, message, command, automod_jobs, stylesheet_jobs,  url_verifier, comment_finder):
+    def do_lock(self, subreddit, message, command, automod_jobs, stylesheet_jobs):
 
         if len(command) >= 2:
-            url_matches = re.search(url_verifier, command[1])
+            url_matches = re.search(self.url_verifier, command[1])
 
             if url_matches != None:
                 permalink = url_matches.groups(0)[0]
@@ -217,13 +207,10 @@ class TeaBot:
                 automod_jobs[1].append(thread_id)
 
                 try:
-                    modteam = praw.Reddit(user_agent=self.useragent)
-                    modteam.login(self.modteam, self.modteampw)
-
-                    locked_thread = praw.objects.Submission.from_url(modteam, permalink)
+                    locked_thread = praw.objects.Submission.from_url(self.r, permalink)
                     locked_thread.set_flair('Locked')
 
-                    comment_matches = re.search(comment_finder, message.body)
+                    comment_matches = re.search(self.comment_finder, message.body)
 
                     if comment_matches != None:
                         body_text = comment_matches.groups(0)[0]
@@ -241,35 +228,29 @@ class TeaBot:
                         
                     self.printlog('Locked ' + thread_id)
 
-                    del modteam
-
                 except Exception,e:
                     self.printlog('Error while locking ' + thread_id + ': ' + str(e))
 
             else:
-                message.reply('**Error:**\n\nMalformed URL: ' + command[1] + '\n\nAcceptable format: http://www.reddit.com/r/' + self.subreddit.display_name + '/comments/linkid/title')
+                message.reply('**Error:**\n\nMalformed URL: ' + command[1] + '\n\nAcceptable format: http://www.reddit.com/r/' + subreddit.praw.display_name + '/comments/linkid/title')
                 self.printlog('Malformed URL for thread lock by ' + message.author.name + ': ' + command[1])
 
         else:
             message.reply('**Syntax Error**:\n\n    !lock threadURL')
 
-    def do_sticky(self, message, command, url_verifier, comment_finder):
-    
+    def do_sticky(self, subreddit, message, command):
         if len(command) >= 2:
             try:
-                #modteam = praw.Reddit(user_agent=self.useragent)
-                #modteam.login(self.modteam, self.modteampw)
-                
-                comment_matches = re.search(comment_finder, message.body)
+                comment_matches = re.search(self.comment_finder, message.body)
 
                 if comment_matches != None:
                     body_text = comment_matches.groups(0)[0]
-                    url_matches = re.search(url_verifier, command[1])
+                    url_matches = re.search(self.url_verifier, command[1])
 
                     if url_matches == None:
                         title = ' '.join(command[1:])
 
-                        stickied_thread = self.r.submit(self.subreddit, title, text=body_text)
+                        stickied_thread = self.r.submit(subreddit.praw, title, text=body_text)
                         stickied_thread.set_flair('Official Thread')
                         stickied_thread.sticky()
 
@@ -280,7 +261,7 @@ class TeaBot:
                     else:
                         permalink = url_matches.groups(0)[0]
 
-                        stickied_thread = praw.objects.Submission.from_url(modteam, permalink)
+                        stickied_thread = praw.objects.Submission.from_url(self.r, permalink)
                         stickied_thread.set_flair('Official Thread')
                         stickied_thread.sticky()
 
@@ -294,23 +275,21 @@ class TeaBot:
                 else:
                     message.reply('You must provide text for the sumission. The format for a sticky is:\n\n    !sticky title|link\n    ---\n    Post Body\n    ---')
 
-                del modteam
-
             except Exception,e:
                 self.printlog('Error while sticky-ing thread: ' + str(e))
 
         else:
             message.reply('**Syntax Error**:\n\n    !sticky title|link\n    ---\n    Post Body\n    ---')
 
-    def do_summary(self, message, command):
+    def do_summary(self, subreddit, message, command):
         if len(command) > 1:
             try:
-                if (time.time() - self.cache_timeouts['usernotes_wiki']) < self.r.config.cache_timeout + 1:
-                    time.sleep(int(time.time() - self.cache_timeouts['usernotes_wiki']) + 1)
+                if (time.time() - subreddit.cache_timeout['usernotes_wiki']) < self.r.config.cache_timeout + 1:
+                    time.sleep(int(time.time() - subreddit.cache_timeout['usernotes_wiki']) + 1)
                 
-                self.cache_timeouts['usernotes_wiki'] = time.time()
+                subreddit.cache_timeout['usernotes_wiki'] = time.time()
 
-                usernotes = self.r.get_wiki_page(self.subreddit, 'usernotes')
+                usernotes = self.r.get_wiki_page(subreddit.praw, 'usernotes')
                 unesc_usernotes = self.parser.unescape(usernotes.content_md)
                 json_notes = json.loads(unesc_usernotes)
 
@@ -337,7 +316,7 @@ class TeaBot:
                                 ids = note['l'].split(',')
 
                                 if ids[0] == 'l':
-                                    permalink = 'http://www.reddit.com/r/' + self.subreddit.display_name + '/comments/' + ids[1] + '/'
+                                    permalink = 'http://www.reddit.com/r/' + subreddit.praw.display_name + '/comments/' + ids[1] + '/'
                                     permalink += 'a/' + ids[2]
 
                                 elif ids[0] == 'm':
@@ -358,14 +337,14 @@ class TeaBot:
 
                 try: #Comments and submissions
                     for comment in user.get_comments(limit=100):
-                        if comment.subreddit == self.subreddit:
+                        if comment.subreddit == subreddit.praw:
                             content.append(comment)
 
                         if len(content) > 30:
                             break
 
                     for submitted in user.get_submitted(limit=20):
-                        if submitted.subreddit == self.subreddit:
+                        if submitted.subreddit == subreddit.praw:
                             content.append(submitted)                        
 
                     content.sort(key=lambda x: x.score, reverse=False)
@@ -435,13 +414,13 @@ class TeaBot:
         else:
             message.reply('**Syntax Error**:\n\n    !Summary username')            
     
-    def apply_automod_jobs(self, message, automod_jobs):
-        if (time.time() - self.cache_timeouts['automoderator_wiki']) < self.r.config.cache_timeout + 1:
-            time.sleep(int(time.time() - self.cache_timeouts['automoderator_wiki']))
+    def apply_automod_jobs(self, subreddit, message, automod_jobs):
+        if (time.time() - subreddit.cache_timeout['automoderator_wiki']) < self.r.config.cache_timeout + 1:
+            time.sleep(int(time.time() - subreddit.cache_timeout['automoderator_wiki']))
         
-        self.cache_timeouts['automoderator_wiki'] = time.time()
+        subreddit.cache_timeout['automoderator_wiki'] = time.time()
 
-        automod_config = self.r.get_wiki_page(self.subreddit, 'automoderator')
+        automod_config = self.r.get_wiki_page(subreddit.praw, 'automoderator')
         new_content = self.parser.unescape(automod_config.content_md)
 
         for x in range(len(automod_jobs[0])):
@@ -462,8 +441,8 @@ class TeaBot:
             else:
                 reason = message.author.name + ': Multiple reasons'
 
-            self.r.edit_wiki_page(self.subreddit, 'automoderator', new_content, reason)
-            self.r.send_message('AutoModerator', self.subreddit.display_name, 'update')
+            self.r.edit_wiki_page(subreddit.praw, 'automoderator', new_content, reason)
+            self.r.send_message('AutoModerator', subreddit.praw.display_name, 'update')
 
             self.message_backlog.append(message)
 
@@ -472,13 +451,13 @@ class TeaBot:
         except Exception,e:
             self.printlog('Error while updating AutoModerator wiki page: ' + str(e))
 
-    def apply_usernotes_jobs(self, message, usernotes_jobs):
-        if (time.time() - self.cache_timeouts['usernotes_wiki']) < self.r.config.cache_timeout + 1:
-            time.sleep(int(time.time() - self.cache_timeouts['usernotes_wiki']))
+    def apply_usernotes_jobs(self, subreddit, message, usernotes_jobs):
+        if (time.time() - subreddit.cache_timeout['usernotes_wiki']) < self.r.config.cache_timeout + 1:
+            time.sleep(int(time.time() - subreddit.cache_timeout['usernotes_wiki']))
         
-        self.cache_timeouts['usernotes_wiki'] = time.time()
+        subreddit.cache_timeout['usernotes_wiki'] = time.time()
 
-        usernotes_page = self.r.get_wiki_page(self.subreddit, 'usernotes')
+        usernotes_page = self.r.get_wiki_page(subreddit.praw, 'usernotes')
         content = self.parser.unescape(usernotes_page.content_md)
 
         notes = json.loads(content)
@@ -520,17 +499,17 @@ class TeaBot:
             edit_reason = message.author.name + ': "create new note on multiple users" via ' + self.username
 
         new_content = json.dumps(notes)
-        self.r.edit_wiki_page(self.subreddit, 'usernotes', new_content, edit_reason)
+        self.r.edit_wiki_page(subreddit.praw, 'usernotes', new_content, edit_reason)
 
         self.printlog('Added shadowban notice to usernotes for ' + username)
 
-    def apply_stylesheet_jobs(self, message, stylesheet_jobs):
-        if (time.time() - self.cache_timeouts['stylesheet']) < self.r.config.cache_timeout + 1:
-            time.sleep(int(time.time() - self.cache_timeouts['stylesheet']))
+    def apply_stylesheet_jobs(self, subreddit, message, stylesheet_jobs):
+        if (time.time() - subreddit.cache_timeout['stylesheet']) < self.r.config.cache_timeout + 1:
+            time.sleep(int(time.time() - subreddit.cache_timeout['stylesheet']))
 
-        self.cache_timeouts['stylesheet'] = time.time()
+        subreddit.cache_timeout['stylesheet'] = time.time()
 
-        stylesheet = self.r.get_stylesheet(self.subreddit)
+        stylesheet = self.r.get_stylesheet(subreddit.praw)
         new_content = self.parser.unescape(stylesheet['stylesheet'])
 
         for x in range(len(stylesheet_jobs[0])):
@@ -538,7 +517,7 @@ class TeaBot:
                 new_content = new_content.replace('.comments-page .sitetable.nestedlisting>.thing.id-t1_addcommentidhere,', '.comments-page .sitetable.nestedlisting>.thing.id-t1_addcommentidhere,\n.comments-page .sitetable.nestedlisting>.thing.id-t1_' + stylesheet_jobs[1][x] + ',')
         
         try:
-            self.r.set_stylesheet(self.subreddit, new_content)
+            self.r.set_stylesheet(subreddit.praw, new_content)
             self.printlog('Updated stylesheet for stickied lock reason')
         except Exception,e:
             self.printlog('Error while updating stylesheet: ' + str(e))

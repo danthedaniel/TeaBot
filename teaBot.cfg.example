@@ -2,11 +2,7 @@
 username=
 password=
 
-[ModTeam credentials]
-username=
-password=
-
 [General]
-version=0.7.6
-subreddit=
-useragent=LittleTeaBot for %(subreddit)s/%(version)s by teaearlgraycold
+version=0.8.0
+subreddits=
+useragent=LittleTeaBot/%(version)s by teaearlgraycold
