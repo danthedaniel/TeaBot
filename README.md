@@ -25,7 +25,7 @@ Python-wise you should only need:
 
 Just run the `main.py` file.
     
-The bot must be a moderator on each subreddit it is added to, and must be given at least `mail` and `wiki` to shadowban, but should also be given `config`, `posts`, and `flair` if you want it to be able to lock and sticky threads. `access` would also be necessary if you want to use the !ban command.
+The bot must be a moderator on each subreddit it monitors, and must be given at least `mail` and `wiki` to shadowban, but should also be given `config`, `posts`, and `flair` if you want it to be able to lock and sticky threads. `access` would also be necessary if you want to use the !ban command.
 
 To prevent issues with parsing and re-building the AutoModerator wiki page (/wiki/automoderator), TeaBot just uses a simply find-replace method to add shadowbans and locks to the wiki page. In order to allow for this add `do_not_remove` to your list of shadowbans (no quotation marks, please).
 
