@@ -514,7 +514,7 @@ class TeaBot:
 
         for x in range(len(stylesheet_jobs[0])):
             if stylesheet_jobs[0][x] == 'lock_sticky':
-                new_content = new_content.replace('.comments-page .sitetable.nestedlisting>.thing.id-t1_addcommentidhere,', '.comments-page .sitetable.nestedlisting>.thing.id-t1_addcommentidhere,\n.comments-page .sitetable.nestedlisting>.thing.id-t1_' + stylesheet_jobs[1][x] + ',')
+                new_content = new_content.replace('.comments-page .sitetable.nestedlisting>.thing.id-t1_addcommentidhere', '.comments-page .sitetable.nestedlisting>.thing.id-t1_addcommentidhere,\n.comments-page .sitetable.nestedlisting>.thing.id-t1_' + stylesheet_jobs[1][x])
         
         try:
             self.r.set_stylesheet(subreddit.praw, new_content)
