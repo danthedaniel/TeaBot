@@ -1,23 +1,36 @@
-import time    #Allows the program to use the sleep() command
-import datetime#Makes it easy to compute the deltaT in days
-import re      #Allows the program to use Regular Expressions
-import praw    #A wrapper for the reddit API. Provides all of the reddit-related methods
-import json
+import praw
+import re
+import html
+import urllib
+import logging
+import configparser
+from xml.sax.saxutils import unescape
 
-import logging #Used for error reporting/debugging
-import ConfigParser
+import time
+import datetime
 
-import urllib  #Used to encode strings for use in URLs
-from HTMLParser import HTMLParser
+import puni
+import teaBotExceptions
 
-class sub_cache:
-    def __init__(self, subreddit):
-        self.cache_timeout = {'modmail': 0, 'automoderator_wiki': 0, 'usernotes_wiki': 0, 'stylesheet': 0}
+from requests.exceptions import HTTPError
+
+import traceback
+
+class sub_info:
+    def __init__(self, r, subreddit):
+        self.cache_timeout = {'modmail': 0, 'automoderator_wiki': 0, 'stylesheet': 0}
         self.praw = subreddit
+        self.un = puni.UserNotes(r, subreddit)
+
+    def __str__(self):
+        return self.praw.display_name
+
+    def reset_timeouts(self):
+        self.cache_timeout = {'modmail': 0, 'automoderator_wiki': 0, 'stylesheet': 0}
 
 class TeaBot:
     def __init__(self, config_file):
-        config = ConfigParser.RawConfigParser()
+        config = configparser.RawConfigParser()
         config.read(config_file)
 
         self.username  = config.get('teaBot credentials', 'username')
@@ -29,46 +42,30 @@ class TeaBot:
 
         del config
 
-        self.parser = HTMLParser()
-
-        self.message_backlog = []
         self.inbox_timeout = 0
 
         logging.basicConfig(filename='teaBot.log',level=logging.DEBUG)
 
         self.r = praw.Reddit(user_agent=self.useragent)
         self.r.login(self.username, self.password)
+
+        self.printlog('TeaBot v' + version + ' started')
+
         self.subreddits = []
 
         #Get subreddits
         for sr_name in sr_list:
-            self.subreddits.append(sub_cache(self.r.get_subreddit(sr_name)))
+            self.subreddits.append(sub_info(self.r, self.r.get_subreddit(sr_name)))
 
-        self.url_verifier   = re.compile(ur'(https?://(?:www.)?reddit.com/r/\w{3,}/comments/([A-Za-z\d]{6})/[^\s]+/([A-Za-z\d]{7})?)')
-        self.comment_finder = re.compile(ur'---\n\n?([\S\s]*?)\n\n?---') #For cutting lock/sticky messages out of commands
+        self.url_verifier = re.compile(r'(https?://(?:www.)?reddit.com/r/\w{3,}/comments/([A-Za-z\d]{6})/[^\s]+/([A-Za-z\d]{7})?)')
 
-        self.printlog('LittleteaBot/' + version + ' started')
-
-    #Subreddit parameter is required to check for moderators
     def check_pms(self):
         if (time.time() - self.inbox_timeout) > self.r.config.cache_timeout + 1:
             self.inbox_timeout = time.time()
 
-            for message in self.r.get_unread(limit=None):     
+            for message in self.r.get_unread(limit=10):     
                 if message.new == True:
                     message.mark_as_read()
-                    
-                    #Author will be None if a mod invite
-                    if message.author.name == 'AutoModerator':
-                        unesc_body = self.parser.unescape(message.body)
-
-                        if message.subject == 'AutoModerator conditions updated':
-                            update_message = self.message_backlog[-1].reply(unesc_body)
-                            #update_message.collapse()
-                            del self.message_backlog[-1]
-                            
-                        else:
-                            self.r.send_message('/r/' + subreddit.praw.display_name, 'AutoModerator Message', unesc_body)
 
     def check_modmail(self):
         for subreddit in self.subreddits:
@@ -92,163 +89,158 @@ class TeaBot:
                                 self.message_commands(reply, subreddit)
 
     def message_commands(self, message, subreddit):
-        command_finder = re.compile(ur'^!([^\s].*)$', re.MULTILINE)
+        command_finder = re.compile(r'^!([^\s].*)$(?:\n{0,2})((?:^>.*\n{0,2})+)?', re.MULTILINE)
 
-        #Used for shadowbanning and locking
+        #Used for shadowbanning
         automod_jobs = []
-        automod_jobs.append([]) #Type
-        automod_jobs.append([]) #Data - username, thread id
 
         #Used for stickying lock reason comments
         stylesheet_jobs = []
-        stylesheet_jobs.append([]) #Type
-        stylesheet_jobs.append([]) #Data
 
-        #Currently only adds shadowban not for username given - can not do anything else
-        usernotes_jobs = []
-        usernotes_jobs.append([]) #Username
-        usernotes_jobs.append([]) #Reason - optional
-        usernotes_jobs.append([]) #Link - optional needs to be pre-formatted
-        matches = re.findall(command_finder, message.body)
+        matches = re.findall(command_finder, unescape(message.body))
 
         for group in matches:
-            command = group.split(' ')
+            command_line = group[0].split()
+            command = command_line[0].lower()
 
-            if command[0].lower() == 'shadowban':
-                self.do_shadowban(subreddit, message, command, automod_jobs, usernotes_jobs)
-            elif command[0].lower() == 'ban':
-                self.do_ban(subreddit, message, command)
-            elif command[0].lower() == 'lock':
-                self.do_lock(subreddit, message, command, automod_jobs, stylesheet_jobs)
-            elif command[0].lower() == 'sticky':
-                self.do_sticky(subreddit, message, command)
-            elif command[0].lower() == 'summary':
-                self.do_summary(subreddit, message, command)
-            else:
-                message.reply('**Unknown Command:**\n\n    !' + command[0])
+            try:
+                comment = group[1]
+            except IndexError:
+                comment = ''
 
-            #End of command parsing
+            try:
+                arguments = command_line[1:]
+            except IndexError:
+                arguments = ''
 
-        if len(automod_jobs[0]) > 0: #If necessary apply all recent changes to automoderator configuration page
+            try:
+                if command == 'shadowban':
+                    resp = self.do_shadowban(subreddit, message, arguments)
+
+                    if resp:
+                        automod_jobs.append(resp)
+                    print(str(automod_jobs))
+                elif command == 'ban':
+                    self.do_ban(subreddit, message, arguments)
+                elif command == 'lock':
+                    resp = self.do_lock(subreddit, message, arguments, comment)
+
+                    if resp:
+                        stylesheet_jobs.append(resp)
+                elif command == 'sticky':
+                    self.do_sticky(subreddit, message, arguments, comment)
+                #elif command == 'summary':
+                    #self.do_summary(subreddit, message, arguments)
+                elif command == 'spam':
+                    self.do_spam(message, arguments)
+                else:
+                    message.reply('**Unknown Command:**\n\n    !' + command[0])
+            except Exception as e:
+                print(traceback.format_exc())
+                self.printlog('Unhandled exception thrown while executing:\n' + group[0])
+
+        if len(automod_jobs) > 0: #If necessary apply all recent changes to automoderator configuration page
             self.apply_automod_jobs(subreddit, message, automod_jobs)
-        if len(usernotes_jobs[0]) > 0:
-            self.apply_usernotes_jobs(subreddit, message, usernotes_jobs)
-        if len(stylesheet_jobs[0]) > 0:
+        if len(stylesheet_jobs) > 0:
             self.apply_stylesheet_jobs(subreddit, message, stylesheet_jobs)
 
     def printlog(self, logmessage):
         logging.info('[' + time.ctime(int(time.time())) + '] ' + logmessage)
         print('[' + time.ctime(int(time.time())) + '] ' + logmessage)
-        
-    def do_shadowban(self, subreddit, message, command, automod_jobs, usernotes_jobs):
+
+    def get_user(self, message, username):
         try:
-            automod_jobs[0].append('shadowban')
-            automod_jobs[1].append(command[1]) #username for automod wiki editing
+            return self.r.get_redditor(username)
 
-            shadowban_reason = ' '.join(command[2:])
-            link_code = 'm,' + message.id
-
-            usernotes_jobs[0].append(command[1]) #username to add to usernotes
-            usernotes_jobs[1].append(shadowban_reason)
-
-            if len(command) == 2:
-                message.reply('User [**' + command[1] + '**](http://reddit.com/user/' + command[1] + ') has been shadowbanned.')
-                usernotes_jobs[2].append(link_code)
+        except HTTPError as e:
+            if e.response.status_code == 404:
+                message.reply('**Error**:\n\nUser "' + username + '" not found')
+                return None
+            elif e.response.status_code in [502, 503, 504]:
+                self.printlog('No response from server')
+                return None
             else:
-                url_matches = re.search(self.url_verifier, shadowban_reason)
+                raise e
 
-                if url_matches != None:
-                    permalink  = url_matches.groups(0)[0]
-                    thread_id  = url_matches.groups(0)[1]
+    def do_spam(self, message, username):
+        user = self.get_user(message, username)
 
-                    link_code = 'l,' + thread_id
+        if (user != None):
+            spam_thread = self.r.submit('spam', 'overview for ' + user.name, url=user._url)
+            message.reply('User [**' + user.name + '**](' + user._url + ') has been flagged in /r/spam [here](' + spam_thread.permalink + ').\n\nIf the account is still up after a few minutes you may need to [contact the admins](http://reddit.com/message/compose?subject=Spam - /u/' + user.name + '&to=/r/reddit.com).')
 
-                    try:
-                        comment_id = url_matches.groups(0)[2]
+    def do_shadowban(self, subreddit, message, arguments):
+        user = self.get_user(message, arguments[0])
 
-                        link_code += ',' + comment_id
+        assert(user != None)
 
-                    except IndexError:
-                        pass
+        reason = ' '.join(arguments[1:])
 
-                usernotes_jobs[2].append(link_code)
+        n = puni.Note(user.name,reason,message.author.name,'m,' + message.id,'botban')
+        subreddit.un.add_note(n)
 
-                if link_code == '':
-                    message.reply('User [**' + command[1] + '**](http://reddit.com/user/' + command[1] + ') has been shadowbanned for *' + shadowban_reason + '*')
+        self.printlog(user.name + ' pending shadowban')
+
+        return ['shadowban', user.name]
+
+    def do_ban(self, subreddit, message, arguments):
+        user = self.get_user(arguments[0])
+
+        if (user != None):
+            if len(arguments) > 1:
+                reason = ' '.join(arguments[1:])
+                subreddit.praw.add_ban(user.name)
+
+                n = puni.Note(user.name,reason,message.author,'m,' + message.id,'permban')
+                subreddit.un.add_note(n)
+
+                if reason == '':
+                    message.reply('User [**' + user.name + '**](' + user._url + ') has been banned')
                 else:
-                    message.reply('User [**' + command[1] + '**](http://reddit.com/user/' + command[1] + ') has been shadowbanned for *' + shadowban_reason + '*')
-
-            self.printlog(command[1] + ' pending shadowban')
-
-        except:
-            self.printlog('Error while responding to shadowban command for ' + command[1])
-
-    def do_ban(self, subreddit, message, command):
-        if len(command) == 2:
-            try:
-                user = self.r.get_redditor(command[1])
-                subreddit.praw.add_ban(user)
-
-                message.reply('User **' + command[1] + '** has been banned')
-            except Exception,e:
-                self.printlog('Error while banning ' + command[1] + ': ' + str(e))
-        else:
-            message.reply('**Syntax Error**:\n\n    !Ban username')
-            
-    def do_lock(self, subreddit, message, command, automod_jobs, stylesheet_jobs):
-
-        if len(command) >= 2:
-            url_matches = re.search(self.url_verifier, command[1])
-
-            if url_matches != None:
-                permalink = url_matches.groups(0)[0]
-                thread_id = url_matches.groups(0)[1]
-
-                automod_jobs[0].append('lock')
-                automod_jobs[1].append(thread_id)
-
-                try:
-                    locked_thread = praw.objects.Submission.from_url(self.r, permalink)
-                    locked_thread.set_flair('Locked')
-
-                    comment_matches = re.search(self.comment_finder, message.body)
-
-                    if comment_matches != None:
-                        body_text = comment_matches.groups(0)[0]
-
-                        new_comment = locked_thread.add_comment(body_text)
-                        new_comment.distinguish()
-
-                        stylesheet_jobs[0].append('lock_sticky')
-                        stylesheet_jobs[1].append(new_comment.id)
-
-                        message.reply('[**' + locked_thread.title + '**](' + locked_thread.permalink + ') has been locked.\n\nTo view the comment automatically made in the thread [click here](' + new_comment.permalink + ').')
-                    else:
-                        message.reply('[**' + locked_thread.title + '**](' + locked_thread.permalink + ') has been locked.\n\nPlease post a comment explaining why it has been locked.')
-                        
-                    self.printlog('Locked ' + thread_id)
-
-                except Exception,e:
-                    self.printlog('Error while locking ' + thread_id + ': ' + str(e))
+                    message.reply('User [**' + user.name + '**](' + user._url + ') has been banned with the note: *' + reason + '*')
 
             else:
-                message.reply('**Error:**\n\nMalformed URL: ' + command[1] + '\n\nAcceptable format: http://www.reddit.com/r/' + subreddit.praw.display_name + '/comments/linkid/title')
-                self.printlog('Malformed URL for thread lock by ' + message.author.name + ': ' + command[1])
+                message.reply('**Syntax Error**:\n\n    !Ban username')
+
+    def do_lock(self, subreddit, message, arguments, comment):
+        if len(comment_line) >= 2:
+            try:
+                locked_thread = praw.objects.Submission.from_url(self.r, permalink)
+            except Exception as e:
+                message.reply('**Error:**\n\nMalformed URL: ' + arguments[0] + '\n\nAcceptable format: http://www.reddit.com/r/' + subreddit.praw.display_name + '/comments/linkid/')
+                self.printlog('Malformed URL for thread lock: ' + arguments[0])
+
+                raise CommandSyntaxError('Malformed thread URL')
+
+            locked_thread.set_flair('Locked')
+
+            if comment_matches != None:
+                new_comment = locked_thread.add_comment(comment)
+                new_comment.distinguish()
+
+                message.reply('[**' + locked_thread.title + '**](' + locked_thread.permalink + ') has been locked.\n\nTo view the comment automatically made in the thread [click here](' + new_comment.permalink + ').')
+            else:
+                message.reply('[**' + locked_thread.title + '**](' + locked_thread.permalink + ') has been locked.\n\nPlease post a comment explaining why it has been locked.')
+                
+                return ['lock_sticky', new_comment.id]
+
+            self.printlog('Locked ' + thread_id)
 
         else:
             message.reply('**Syntax Error**:\n\n    !lock threadURL')
+            raise CommandSyntaxError('No thread URL provided')
 
-    def do_sticky(self, subreddit, message, command):
-        if len(command) >= 2:
+    def do_sticky(self, subreddit, message, arguments):
+        if len(arguments) >= 2:
             try:
                 comment_matches = re.search(self.comment_finder, message.body)
 
                 if comment_matches != None:
                     body_text = comment_matches.groups(0)[0]
-                    url_matches = re.search(self.url_verifier, command[1])
+                    url_matches = re.search(self.url_verifier, arguments[1])
 
                     if url_matches == None:
-                        title = ' '.join(command[1:])
+                        title = ' '.join(arguments[1:])
 
                         stickied_thread = self.r.submit(subreddit.praw, title, text=body_text)
                         stickied_thread.set_flair('Official Thread')
@@ -275,233 +267,48 @@ class TeaBot:
                 else:
                     message.reply('You must provide text for the sumission. The format for a sticky is:\n\n    !sticky title|link\n    ---\n    Post Body\n    ---')
 
-            except Exception,e:
+            except Exception as e:
                 self.printlog('Error while sticky-ing thread: ' + str(e))
 
         else:
             message.reply('**Syntax Error**:\n\n    !sticky title|link\n    ---\n    Post Body\n    ---')
 
-    def do_summary(self, subreddit, message, command):
-        if len(command) > 1:
-            try:
-                if (time.time() - subreddit.cache_timeout['usernotes_wiki']) < self.r.config.cache_timeout + 1:
-                    time.sleep(int(time.time() - subreddit.cache_timeout['usernotes_wiki']) + 1)
-                
-                subreddit.cache_timeout['usernotes_wiki'] = time.time()
-
-                usernotes = self.r.get_wiki_page(subreddit.praw, 'usernotes')
-                unesc_usernotes = self.parser.unescape(usernotes.content_md)
-                json_notes = json.loads(unesc_usernotes)
-
-                moderators = json_notes['constants']['users']
-                warnings = json_notes['constants']['warnings']
-
-                bot_reply = ''
-
-                user = self.r.get_redditor(command[1])
-
-                deltaT = int(time.time() - user.created_utc)
-                bot_reply += '**User Report:** [/u/' + user.name + '](http://reddit.com/user/' + user.name + ') - Age: ' + str(datetime.timedelta(0, deltaT)) + '\n\n'
-
-                try: #Usernotes
-                    notes = json_notes['users'][user.name]['ns']
-
-                    bot_reply += '---\n\nWarning | Reason | Moderator\n---|---|----\n'
-
-                    for note in notes:
-                        permalink = ''
-                        
-                        if note['l'] != '':
-                            try:
-                                ids = note['l'].split(',')
-
-                                if ids[0] == 'l':
-                                    permalink = 'http://www.reddit.com/r/' + subreddit.praw.display_name + '/comments/' + ids[1] + '/'
-                                    permalink += 'a/' + ids[2]
-
-                                elif ids[0] == 'm':
-                                    permalink = 'http://www.reddit.com/message/messages/' + ids[1]
-
-                            except IndexError:
-                                pass
-
-                        if permalink == '':
-                            bot_reply += warnings[note['w']] + ' | ' + note['n'] + ' | ' + moderators[note['m']] + '\n'
-                        else:
-                            bot_reply += warnings[note['w']] + ' | [' + note['n'] + '](' + permalink + ') | ' + moderators[note['m']] + '\n'
-
-                except KeyError:
-                    self.printlog('Could not find user ' + user.name + ' in usernotes')
-
-                content = []
-
-                try: #Comments and submissions
-                    for comment in user.get_comments(limit=100):
-                        if comment.subreddit == subreddit.praw:
-                            content.append(comment)
-
-                        if len(content) > 30:
-                            break
-
-                    for submitted in user.get_submitted(limit=20):
-                        if submitted.subreddit == subreddit.praw:
-                            content.append(submitted)                        
-
-                    content.sort(key=lambda x: x.score, reverse=False)
-
-                    #Cut down to bottom 12 content
-                    while len(content) > 12:
-                        del content[12]
-
-                    bot_reply += '\nLink | Body/Title | Score\n---|---|----\n'
-
-                    for content_object in content:
-                        if type(content_object) == praw.objects.Comment:
-                            temp_comment = content_object.body.replace('\n', ' ')
-
-                            #Cut down comments to 200 characters, while extending over the 200 char limit
-                            #to preserve markdown links
-                            if len(temp_comment) > 200:
-                                i = 200
-                                increment = -1
-
-                                link = False
-
-                                while i > -1 and (i + 1) < len(temp_comment):
-                                    if temp_comment[i] == ')':
-                                        link = True
-                                        break
-
-                                    if temp_comment[i] == '(':
-                                        if temp_comment[i - 1] == ']':
-                                            increment = 1
-                                        else:
-                                            break
-
-                                    i += increment
-
-                                i += 1
-                                
-                                if i < 200 or link == False:
-                                    i = 200
-
-                                temp_comment = temp_comment[:i]
-
-                                if i >= len(temp_comment):
-                                    temp_comment += '...'
-
-                            if content_object.banned_by == None:
-                                bot_reply += '[Comment](' + content_object.permalink + '?context=3) | ' + temp_comment + ' | ' + str(content_object.score) + '\n'
-                            else:
-                                bot_reply += '[**Comment**](' + content_object.permalink + '?context=3) | ' + temp_comment + ' | ' + str(content_object.score) + '\n'
-
-                        if type(content_object) == praw.objects.Submission:
-                            if content_object.banned_by == None:
-                                bot_reply += '[Submission](' + content_object.permalink + ') | ' + content_object.title + ' | ' + str(content_object.score) + '\n'
-                            else:
-                                bot_reply += '[**Submission**](' + content_object.permalink + ') | ' + content_object.title + ' | ' + str(content_object.score) + '\n'
-
-                except Exception,e:
-                    self.printlog('Error while trying to read user comments:' + str(e))
-
-                message.reply(bot_reply)
-                self.printlog('Summary on ' + user.name + ' provided')
-
-            except Exception,e:
-                message.reply('**Error**:\n\nError while providing summary')
-                self.printlog('Error while trying to give summary on ' + command[1] + ': ' + str(e))
-
-        else:
-            message.reply('**Syntax Error**:\n\n    !Summary username')            
-    
     def apply_automod_jobs(self, subreddit, message, automod_jobs):
         if (time.time() - subreddit.cache_timeout['automoderator_wiki']) < self.r.config.cache_timeout + 1:
             time.sleep(int(time.time() - subreddit.cache_timeout['automoderator_wiki']))
         
         subreddit.cache_timeout['automoderator_wiki'] = time.time()
 
-        automod_config = self.r.get_wiki_page(subreddit.praw, 'automoderator')
-        new_content = self.parser.unescape(automod_config.content_md)
+        automod_config = self.r.get_wiki_page(subreddit.praw, 'config/automoderator')
+        new_content = unescape(automod_config.content_md)
 
-        for x in range(len(automod_jobs[0])):
-            if automod_jobs[0][x] == 'shadowban':
-                new_content = new_content.replace('do_not_remove', 'do_not_remove, ' + automod_jobs[1][x])
-
-            elif automod_jobs[0][x] == 'lock':
-                new_content = new_content.replace('do_not_touch', 'do_not_touch, ' + automod_jobs[1][x])
+        for x in range(len(automod_jobs)):
+            if automod_jobs[x][0] == 'shadowban':
+                new_content = new_content.replace('"do_not_remove"', '"do_not_remove", "' + automod_jobs[x][1] + '"')
 
         try:
-            if len(automod_jobs[0]) == 1:
+            if len(automod_jobs) == 1:
                 if automod_jobs[0][0] == 'shadowban':
-                    reason = message.author.name + ': Shadowbanning ' + automod_jobs[1][0]
-
-                elif automod_jobs[0][0] == 'lock':
-                    reason = message.author.name + ': Locking ' + automod_jobs[1][0]
-
+                    reason = message.author.name + ': Shadowbanning ' + automod_jobs[0][1]
+                    message.reply('User [**' + automod_jobs[0][1] + '**](http://reddit.com/user/' + automod_jobs[0][1] + ') has been shadowbanned.')
             else:
                 reason = message.author.name + ': Multiple reasons'
 
-            self.r.edit_wiki_page(subreddit.praw, 'automoderator', new_content, reason)
-            self.r.send_message('AutoModerator', subreddit.praw.display_name, 'update')
+            try:
+                self.r.edit_wiki_page(subreddit.praw, 'config/automoderator', new_content, reason)
+            
+            except HTTPError as e:
+                if e.response.status_code == 415:
+                    j = json.loads(g.response._content.decode('utf-8'))
 
-            self.message_backlog.append(message)
+                    if j['reason'] == 'SPECIAL_ERRORS':
+                        reason = j['special_errors']
+                        message.reply('AutoModerator threw the following error:\n\n' + reason)
 
             self.printlog('Updated AutoModerator wiki page')
 
-        except Exception,e:
+        except Exception as e:
             self.printlog('Error while updating AutoModerator wiki page: ' + str(e))
-
-    def apply_usernotes_jobs(self, subreddit, message, usernotes_jobs):
-        if (time.time() - subreddit.cache_timeout['usernotes_wiki']) < self.r.config.cache_timeout + 1:
-            time.sleep(int(time.time() - subreddit.cache_timeout['usernotes_wiki']))
-        
-        subreddit.cache_timeout['usernotes_wiki'] = time.time()
-
-        usernotes_page = self.r.get_wiki_page(subreddit.praw, 'usernotes')
-        content = self.parser.unescape(usernotes_page.content_md)
-
-        notes = json.loads(content)
-
-        moderators = notes['constants']['users']
-        mod_name = message.author.name
-
-        try:
-            mod_index = moderators.index(mod_name)
-        except ValueError:
-            notes['constants']['users'].append(mod_name)
-            mod_index = moderators.index(mod_name)
-
-        for x in range(len(usernotes_jobs[0])):
-            try:
-                username = self.r.get_redditor(usernotes_jobs[0][x]).name
-            except:
-                username = usernotes_jobs[0][x]
-
-            if usernotes_jobs[1][x] == '':
-                reason = 'Shadowbanned'
-            else:
-                reason = 'Shadowbanned for ' + usernotes_jobs[1][x]
-
-            time_of_ban = int(1000*time.time())
-
-            new_JSON_object = json.loads('{"n":"' + reason + '","t":' + str(time_of_ban) + ',"m":' + str(mod_index) + ',"l":"' + usernotes_jobs[2][x] + '","w":1}')
-
-            try:
-                notes['users'][username]['ns'].insert(0, new_JSON_object)
-            except KeyError:
-                notes['users'][username] = {}
-                notes['users'][username]['ns'] = []
-                notes['users'][username]['ns'].append(new_JSON_object)
-
-        if len(usernotes_jobs[0]) == 1:
-            edit_reason = message.author.name + ': "create new note on ' + usernotes_jobs[0][x] + '" via ' + self.username
-        else:
-            edit_reason = message.author.name + ': "create new note on multiple users" via ' + self.username
-
-        new_content = json.dumps(notes)
-        self.r.edit_wiki_page(subreddit.praw, 'usernotes', new_content, edit_reason)
-
-        self.printlog('Added shadowban notice to usernotes for ' + username)
 
     def apply_stylesheet_jobs(self, subreddit, message, stylesheet_jobs):
         if (time.time() - subreddit.cache_timeout['stylesheet']) < self.r.config.cache_timeout + 1:
@@ -510,15 +317,14 @@ class TeaBot:
         subreddit.cache_timeout['stylesheet'] = time.time()
 
         stylesheet = self.r.get_stylesheet(subreddit.praw)
-        new_content = self.parser.unescape(stylesheet['stylesheet'])
+        new_content = unescape(stylesheet['stylesheet'])
 
-        for x in range(len(stylesheet_jobs[0])):
-            if stylesheet_jobs[0][x] == 'lock_sticky':
-                new_content = new_content.replace('.comments-page .sitetable.nestedlisting>.thing.id-t1_addcommentidhere', '.comments-page .sitetable.nestedlisting>.thing.id-t1_addcommentidhere,\n.comments-page .sitetable.nestedlisting>.thing.id-t1_' + stylesheet_jobs[1][x])
+        for x in range(len(stylesheet_jobs)):
+            if stylesheet_jobs[x][0] == 'lock_sticky':
+                new_content = new_content.replace('.comments-page .sitetable.nestedlisting>.thing.id-t1_addcommentidhere,', '.comments-page .sitetable.nestedlisting>.thing.id-t1_addcommentidhere,\n.comments-page .sitetable.nestedlisting>.thing.id-t1_' + stylesheet_jobs[x][1] + ',')
         
         try:
             self.r.set_stylesheet(subreddit.praw, new_content)
             self.printlog('Updated stylesheet for stickied lock reason')
-        except Exception,e:
+        except Exception as e:
             self.printlog('Error while updating stylesheet: ' + str(e))
-                
