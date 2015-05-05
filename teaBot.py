@@ -14,8 +14,6 @@ import teaBotExceptions
 
 from requests.exceptions import HTTPError
 
-import traceback
-
 class sub_info:
     def __init__(self, r, subreddit):
         self.cache_timeout = {'modmail': 0, 'automoderator_wiki': 0, 'stylesheet': 0}
@@ -136,7 +134,6 @@ class TeaBot:
                 else:
                     message.reply('**Unknown Command:**\n\n    !' + command[0])
             except Exception as e:
-                print(traceback.format_exc())
                 self.printlog('Unhandled exception thrown while executing:\n' + group[0])
 
         if len(automod_jobs) > 0: #If necessary apply all recent changes to automoderator configuration page
@@ -162,8 +159,8 @@ class TeaBot:
             else:
                 raise e
 
-    def do_spam(self, message, username):
-        user = self.get_user(message, username)
+    def do_spam(self, message, arguements):
+        user = self.get_user(message, arguments[0])
 
         if (user != None):
             spam_thread = self.r.submit('spam', 'overview for ' + user.name, url=user._url)

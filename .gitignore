@@ -1,1 +1,2 @@
-teaBot.pyc
+*.pyc
+teaBot.cfg
