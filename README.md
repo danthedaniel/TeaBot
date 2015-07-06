@@ -14,7 +14,7 @@ In the teaBot.cfg file you first need to enter your bot's credentials, and then 
     password=mypassword
 
     [General]
-    version=0.9.0
+    version=0.9.2
     subreddits=subreddit1,subreddit2,subreddit3
     useragent=LittleTeaBot/%(version)s by teaearlgraycold
     
