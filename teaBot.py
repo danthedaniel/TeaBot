@@ -1,8 +1,10 @@
 import praw
 import re
 import html
+import shlex
 import urllib
 import logging
+import traceback
 import configparser
 from xml.sax.saxutils import unescape
 
@@ -10,6 +12,7 @@ import time
 import datetime
 
 import puni
+import mmdb
 import teaBotExceptions
 
 from requests.exceptions import HTTPError
@@ -19,6 +22,7 @@ class sub_info:
         self.cache_timeout = {'modmail': 0, 'automoderator_wiki': 0, 'stylesheet': 0}
         self.praw = subreddit
         self.un = puni.UserNotes(r, subreddit)
+        self.mmdb = mmdb.ModmaildB(r, subreddit)
 
     def __str__(self):
         return self.praw.display_name
@@ -58,7 +62,7 @@ class TeaBot:
         self.url_verifier = re.compile(r'(https?://(?:www.)?reddit.com/r/\w{3,}/comments/([A-Za-z\d]{6})/[^\s]+/([A-Za-z\d]{7})?)')
 
     def check_pms(self):
-        if (time.time() - self.inbox_timeout) > self.r.config.cache_timeout + 1:
+        if (time.time() - self.inbox_timeout) > 35:
             self.inbox_timeout = time.time()
 
             for message in self.r.get_unread(limit=10):     
@@ -67,13 +71,16 @@ class TeaBot:
 
     def check_modmail(self):
         for subreddit in self.subreddits:
-            if (time.time() - subreddit.cache_timeout['modmail']) > self.r.config.cache_timeout + 1:
+            # print(str(time.time() - subreddit.cache_timeout['modmail']))
+
+            if (time.time() - subreddit.cache_timeout['modmail']) > 35:
                 subreddit.cache_timeout['modmail'] = time.time()
 
-                for modmail in subreddit.praw.get_mod_mail(limit=6):        
+                for modmail in subreddit.praw.get_mod_mail(limit=10):        
                     #Perform checks on top level modmail            
                     if modmail.new == True:
                         modmail.mark_as_read()
+                        subreddit.mmdb.addMail(modmail) # Add modmail to dB
 
                         if modmail.distinguished == 'moderator':
                             self.message_commands(modmail, subreddit)
@@ -81,6 +88,7 @@ class TeaBot:
                     #Perform checks on modmail replies
                     for reply in modmail.replies:
                         if reply.new == True:
+                            subreddit.mmdb.addMail(reply) # Add modmail reply to dB
                             reply.mark_as_read()
 
                             if reply.distinguished == 'moderator':
@@ -98,7 +106,7 @@ class TeaBot:
         matches = re.findall(command_finder, unescape(message.body))
 
         for group in matches:
-            command_line = group[0].split()
+            command_line = shlex.split(group[0])
             command = command_line[0].lower()
 
             try:
@@ -116,8 +124,7 @@ class TeaBot:
                     resp = self.do_shadowban(subreddit, message, arguments)
 
                     if resp:
-                        automod_jobs.append(resp)
-                    print(str(automod_jobs))
+                        automod_jobs.append(resp)                    
                 elif command == 'ban':
                     self.do_ban(subreddit, message, arguments)
                 elif command == 'lock':
@@ -131,10 +138,13 @@ class TeaBot:
                     #self.do_summary(subreddit, message, arguments)
                 elif command == 'spam':
                     self.do_spam(message, arguments)
+                elif command == 'search':
+                    self.do_search(subreddit, message, arguments)
                 else:
                     message.reply('**Unknown Command:**\n\n    !' + command[0])
             except Exception as e:
                 self.printlog('Unhandled exception thrown while executing:\n' + group[0])
+                traceback.print_exc()
 
         if len(automod_jobs) > 0: #If necessary apply all recent changes to automoderator configuration page
             self.apply_automod_jobs(subreddit, message, automod_jobs)
@@ -159,7 +169,25 @@ class TeaBot:
             else:
                 raise e
 
-    def do_spam(self, message, arguements):
+    def do_search(self, subreddit, message, arguments):
+        self.printlog(str(message.author) + ' searching for ' + str(arguments))
+        response = ''
+
+        foundMail = subreddit.mmdb.findMail(arguments) 
+
+        for modmail in foundMail:
+            if modmail.id != message.id:
+                try:
+                    response += '1. [**' + str(modmail.author.name) + '**: ' + modmail.subject + '](http://reddit.com/message/messages/' + modmail.id + ')\n'
+                except AttributeError:
+                    response += '1. [**' + str(modmail.author.display_name) + '**: ' + modmail.subject + '](http://reddit.com/message/messages/' + modmail.id + ')\n' 
+
+        if response == '':
+            message.reply('**No matching results found**')
+        else:
+            message.reply('**Results:**\n\n' + response)
+
+    def do_spam(self, message, arguments):
         user = self.get_user(message, arguments[0])
 
         if (user != None):
@@ -268,7 +296,7 @@ class TeaBot:
                 self.printlog('Error while sticky-ing thread: ' + str(e))
 
         else:
-            message.reply('**Syntax Error**:\n\n    !sticky title|link\n    ---\n    Post Body\n    ---')
+            message.reply('**Syntax Error**:\n\n    !sticky title|link\n\n>Post Body\n\n>More body')
 
     def apply_automod_jobs(self, subreddit, message, automod_jobs):
         if (time.time() - subreddit.cache_timeout['automoderator_wiki']) < self.r.config.cache_timeout + 1:

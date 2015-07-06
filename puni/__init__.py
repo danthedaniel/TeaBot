@@ -6,6 +6,8 @@ from xml.sax.saxutils import unescape
 
 from requests.exceptions import HTTPError
 
+import traceback
+
 class PermissionError(Exception):
     def __init__(self, value):
         self.value = value
@@ -18,7 +20,7 @@ class ServerResponseError(Exception):
     def __str__(self):
         return repr(self.value)
 
-warning_types = ['none','spamwatch','spamwarn','abusewarn','ban','permban','botban']
+warning_types = ['none','spamwatch','spamwarn','abusewarn','ban','permban','botban', 'gooduser']
 
 def compress_url(link):
     comments = re.compile(r'/comments/([A-Za-z\d]{6})/[^\s]+/([A-Za-z\d]{7})?')
@@ -56,7 +58,7 @@ def expand_url(note, subreddit):
             return None
 
 class Note:
-    def __init__(self, username, note, moderator=None, link='', warning='none', time=int(time.time()*1000)):
+    def __init__(self, username, note, moderator=None, link='', warning='none', time=int(time.time())):
         self.username = username
 
         global warning_types
@@ -80,9 +82,11 @@ class UserNotes:
         self.subreddit = subreddit
 
         #Supported schema version
-        self.schema = 4
+        self.schema = 5
 
         global warning_types
+
+        #self.parser = HTMLParser()
 
         self.cache_timeout = 0
         self.num_retries = 2
@@ -107,6 +111,8 @@ class UserNotes:
                 usernotes = self.r.get_wiki_page(self.subreddit, self.page_name)
 
             except HTTPError as e:
+                print(traceback.format_exc())
+
                 if e.response.status_code == 403:
                     print('puni needs the wiki permission to read usernotes')
                     raise PermissionError('No wiki permission')
@@ -131,6 +137,7 @@ class UserNotes:
                         try:
                             return self.cached_json
                         except NameError:
+                            print(traceback.format_exc())
                             raise ServerResponseError('Could not load initial usernotes cache due to server response')
 
                 else:
@@ -139,6 +146,7 @@ class UserNotes:
             try:
                 notes = json.loads(unescape(usernotes.content_md)) #Remove XML entities and convert into a dict
             except ValueError:
+                print(traceback.format_exc())
                 return None
 
             if notes['ver'] != self.schema:
@@ -161,6 +169,7 @@ class UserNotes:
             self.r.edit_wiki_page(self.subreddit, self.page_name, json.dumps(notes), reason)
                 
         except HTTPError as e:
+            print(traceback.format_exc())
             if e.response.status_code == 403:
                 print('puni needs the wiki permission to write to usernotes')
 
@@ -176,6 +185,7 @@ class UserNotes:
         try:
             return [Note(username, x['n'], x['t'], x['m'], x['l'], x['w']) for x in notes['users'][username]['ns']]
         except KeyError:
+            print(traceback.format_exc())
             return []
 
     def add_note(self, note):
