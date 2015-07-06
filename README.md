@@ -1,4 +1,4 @@
-ExplainLikeImFiveBot
+TeaBot
 ====================
 
 Bot that reads and executes commands from modmail. Some manual configuration in AM wiki and Stylesheet required.
