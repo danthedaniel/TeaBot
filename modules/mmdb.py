@@ -31,7 +31,7 @@ class ModmaildB:
         """
         response = []
 
-        for row in self.c.execute('SELECT * FROM modmail ORDER BY time'):
+        for row in self.c.execute('SELECT * FROM modmail ORDER BY time DESC'):
             compliance = 0
 
             for arg in args:

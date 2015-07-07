@@ -3,6 +3,6 @@ username=
 password=
 
 [General]
-version=0.9.2
+version=0.9.3
 subreddits=
 useragent=LittleTeaBot/%(version)s by teaearlgraycold

@@ -6,7 +6,7 @@ import teaBot
 #import traceback
 
 def main():
-    logging.basicConfig(filename='teaBot.log',level=logging.DEBUG)
+    logging.basicConfig(filename='teaBot.log',level=logging.WARNING)
 
     #try:
     bot = teaBot.TeaBot('teaBot.cfg')

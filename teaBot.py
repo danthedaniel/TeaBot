@@ -1,34 +1,31 @@
-import praw
 import re
+import praw
 import html
+import time
 import shlex
 import urllib
 import logging
 import traceback
 import configparser
 from xml.sax.saxutils import unescape
-
-import time
-import datetime
-
-import puni
-import mmdb
-import teaBotExceptions
-
+import requests
 from requests.exceptions import HTTPError
 
-class sub_info:
+from modules import puni
+from modules import mmdb
+from teaBotExceptions import *
+
+class subInfo:
     def __init__(self, r, subreddit):
-        self.cache_timeout = {'modmail': 0, 'automoderator_wiki': 0, 'stylesheet': 0}
         self.praw = subreddit
         self.un = puni.UserNotes(r, subreddit)
         self.mmdb = mmdb.ModmaildB(r, subreddit)
+        
+        self.cache_timeout = {'modmail': 0, 'automoderator_wiki': 0, 'stylesheet': 0, 'moderators': 0}
+        self.permissions_cache = {}
 
     def __str__(self):
         return self.praw.display_name
-
-    def reset_timeouts(self):
-        self.cache_timeout = {'modmail': 0, 'automoderator_wiki': 0, 'stylesheet': 0}
 
 class TeaBot:
     def __init__(self, config_file):
@@ -44,9 +41,10 @@ class TeaBot:
 
         del config
 
-        self.inbox_timeout = 0
+        self.inbox_timeout = 0      # Bot's inbox timeout
+        self.moderators_timeout = 0 # Timeout for /r/<subreddit>/about/moderators page
 
-        logging.basicConfig(filename='teaBot.log',level=logging.DEBUG)
+        logging.basicConfig(filename='teaBot.log',level=logging.WARNING)
 
         self.r = praw.Reddit(user_agent=self.useragent)
         self.r.login(self.username, self.password)
@@ -57,12 +55,48 @@ class TeaBot:
 
         #Get subreddits
         for sr_name in sr_list:
-            self.subreddits.append(sub_info(self.r, self.r.get_subreddit(sr_name)))
+            self.subreddits.append(subInfo(self.r, self.r.get_subreddit(sr_name)))
+            self.get_all_perms(self.subreddits[-1])
 
         self.url_verifier = re.compile(r'(https?://(?:www.)?reddit.com/r/\w{3,}/comments/([A-Za-z\d]{6})/[^\s]+/([A-Za-z\d]{7})?)')
 
+    def get_all_perms(self, subreddit, override=False):
+        """
+        Refreshes subreddit's cached moderator permissions if more than an hour has passed
+        API will return permissions of:
+        wiki, posts, access, mail, config, flair, or just: all
+        """
+        seconds_in_hour = 3600
+
+        if (time.time() - subreddit.cache_timeout['moderators']) > seconds_in_hour or override:
+            subreddit.cache_timeout['moderators'] = time.time()
+
+            response = self.r.request('https://www.reddit.com/r/' + subreddit.praw.display_name + '/about/moderators.json').json()
+
+            for user in response['data']['children']:
+                subreddit.permissions_cache[user['name']] = user['mod_permissions']
+
+    def check_perms(self, subreddit, message, required_perms):
+        """
+        Raises ModPermissionError if the user does not have the correct permission
+        """
+        self.get_all_perms(subreddit)
+
+        try:
+            perms = subreddit.permissions_cache[message.author.name]
+        except KeyError:
+            self.get_all_perms(subreddit, override=True)
+            perms = subreddit.permissions_cache[message.author.name]
+
+        if 'all' in perms:
+            return
+
+        for perm in required_perms:
+            if perm not in perms:
+                raise ModPermissionError(message.author.name + ' does not have ' + perm)
+
     def check_pms(self):
-        if (time.time() - self.inbox_timeout) > 35:
+        if (time.time() - self.inbox_timeout) > self.r.config.cache_timeout + 5:
             self.inbox_timeout = time.time()
 
             for message in self.r.get_unread(limit=10):     
@@ -71,16 +105,15 @@ class TeaBot:
 
     def check_modmail(self):
         for subreddit in self.subreddits:
-            # print(str(time.time() - subreddit.cache_timeout['modmail']))
-
-            if (time.time() - subreddit.cache_timeout['modmail']) > 35:
+            if (time.time() - subreddit.cache_timeout['modmail']) > self.r.config.cache_timeout + 5:
                 subreddit.cache_timeout['modmail'] = time.time()
 
-                for modmail in subreddit.praw.get_mod_mail(limit=10):        
+                for modmail in subreddit.praw.get_mod_mail(limit=10):
                     #Perform checks on top level modmail            
                     if modmail.new == True:
-                        modmail.mark_as_read()
                         subreddit.mmdb.addMail(modmail) # Add modmail to dB
+
+                        modmail.mark_as_read()
 
                         if modmail.distinguished == 'moderator':
                             self.message_commands(modmail, subreddit)
@@ -89,6 +122,7 @@ class TeaBot:
                     for reply in modmail.replies:
                         if reply.new == True:
                             subreddit.mmdb.addMail(reply) # Add modmail reply to dB
+
                             reply.mark_as_read()
 
                             if reply.distinguished == 'moderator':
@@ -142,6 +176,8 @@ class TeaBot:
                     self.do_search(subreddit, message, arguments)
                 else:
                     message.reply('**Unknown Command:**\n\n    !' + command[0])
+            except ModPermissionError:
+                message.reply('**Error:**\n\nInsufficient permissions to perform command')
             except Exception as e:
                 self.printlog('Unhandled exception thrown while executing:\n' + group[0])
                 traceback.print_exc()
@@ -195,20 +231,21 @@ class TeaBot:
             message.reply('User [**' + user.name + '**](' + user._url + ') has been flagged in /r/spam [here](' + spam_thread.permalink + ').\n\nIf the account is still up after a few minutes you may need to [contact the admins](http://reddit.com/message/compose?subject=Spam - /u/' + user.name + '&to=/r/reddit.com).')
 
     def do_shadowban(self, subreddit, message, arguments):
+        self.check_perms(subreddit, message, ['access'])
         user = self.get_user(message, arguments[0])
 
-        assert(user != None)
+        if user != None:
+            reason = ' '.join(arguments[1:])
 
-        reason = ' '.join(arguments[1:])
+            n = puni.Note(user.name,reason,message.author.name,'m,' + message.id,'botban')
+            subreddit.un.add_note(n)
 
-        n = puni.Note(user.name,reason,message.author.name,'m,' + message.id,'botban')
-        subreddit.un.add_note(n)
+            self.printlog(user.name + ' pending shadowban')
 
-        self.printlog(user.name + ' pending shadowban')
-
-        return ['shadowban', user.name]
+            return ['shadowban', user.name]
 
     def do_ban(self, subreddit, message, arguments):
+        self.check_perms(subreddit, message, ['access'])
         user = self.get_user(arguments[0])
 
         if (user != None):
@@ -228,6 +265,8 @@ class TeaBot:
                 message.reply('**Syntax Error**:\n\n    !Ban username')
 
     def do_lock(self, subreddit, message, arguments, comment):
+        self.check_perms(subreddit, message, ['posts'])
+
         if len(comment_line) >= 2:
             try:
                 locked_thread = praw.objects.Submission.from_url(self.r, permalink)
@@ -256,7 +295,9 @@ class TeaBot:
             raise CommandSyntaxError('No thread URL provided')
 
     def do_sticky(self, subreddit, message, arguments):
-        if len(arguments) >= 2:
+        self.check_perms(subreddit, message, ['posts'])
+
+        if len(arguments) > 1:
             try:
                 comment_matches = re.search(self.comment_finder, message.body)
 
