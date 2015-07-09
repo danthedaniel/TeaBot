@@ -32,13 +32,20 @@ class ModmaildB:
         response = []
 
         for row in self.c.execute('SELECT * FROM modmail ORDER BY time DESC'):
+            compliance = 0
+
             for arg in args:
                 if arg[0:3] == 'to:' and row[2] == arg[3:]:
-                    if arg[0:5] == 'from:' and row[1] == arg[5:]:
-                        if arg.lower() in row[3].lower():
-                            response.append(self.messageFromRow(row))
+                    compliance += 1
+                elif arg[0:5] == 'from:' and row[1] == arg[5:]:
+                    compliance += 1
+                elif arg.lower() in row[3].lower():
+                    compliance += 1
 
-                if len(response) > 25:
+            if compliance == len(args):
+                if len(response) < 25:
+                    response.append(self.messageFromRow(row))
+                else:
                     break
 
         return response
@@ -48,11 +55,11 @@ class ModmaildB:
         Creates a PRAW message object from an SQL response
         """
         jsondict = {'body': row[3], 
-        'created_utc': row[4],
-        'id': row[0],
-        'dest': row[2],
-        'subject': row[5],
-        'replies': None}
+                    'created_utc': row[4],
+                    'id': row[0],
+                    'dest': row[2],
+                    'subject': row[5],
+                    'replies': None}
 
         if row[1][0] == '#':
             jsondict['author'] = self.r.get_subreddit(row[1][1:])

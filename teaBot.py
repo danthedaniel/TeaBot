@@ -54,7 +54,7 @@ class TeaBot:
 
         # Now that we're all OAuth'd up, override PRAW's time limits
         self.r.config.cache_timeout = -1
-        self.cache_timeout = 10
+        self.cache_timeout = 6
         self.r.config.api_request_delay = 1.0
 
         self.printlog('TeaBot v' + self.version + ' started')
