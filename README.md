@@ -10,7 +10,7 @@ Does not accept mod invites - you must create your own instance at this time.
 In the config/teaBot.cfg file you first need to enter the subreddit(s) you want it to monitor. More than one subreddit can be added by seperating each subreddit name with a comma.
 
     [General]
-    version=0.9.2
+    version=0.9.4
     subreddits=subreddit1,subreddit2,subreddit3
     useragent=TeaBot/%(version)s by teaearlgraycold
 
