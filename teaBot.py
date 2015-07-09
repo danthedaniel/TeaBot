@@ -202,7 +202,7 @@ class TeaBot:
                 else:
                     message.reply('**Unknown Command:**\n\n    !' + command[0])
             except ModPermissionError:
-                message.reply('**Error:**\n\nInsufficient permissions to perform command')
+                message.reply('**Error:**\n\nYou have insufficient permissions to perform this command')
             except UserNotFoundError:
                 message.reply('**Error**:\n\nUser "' + username + '" not found')
             except Exception as e:

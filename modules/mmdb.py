@@ -15,13 +15,23 @@ class ModmaildB:
         self.initTable()
 
     def initTable(self):
-        self.c.execute('CREATE TABLE IF NOT EXISTS modmail (id text, user text, dest text, body text, time real, subject text)')
-        self.conn.commit()
+        try:
+            self.c.execute('SELECT * FROM modmail') # Check if table exists
+        except sqlite3.OperationalError:
+            print(self.subreddit.display_name + ': initializing database')
 
-    def addMail(self, modmail):
+            self.r.send_message(self.subreddit, 'Modmail DataBase Status', 'Your modmail history is currently being archived as far back as is possible')
+            
+            self.c.execute('CREATE TABLE IF NOT EXISTS modmail (id text, user text, dest text, body text, time real, subject text)')
+            self.loadBacklog()
+            self.conn.commit()
+
+    def addMail(self, modmail, commit=True):
         values = (modmail.id, modmail.author.name, modmail.dest, modmail.body, int(modmail.created_utc), modmail.subject)
         self.c.execute('INSERT INTO modmail VALUES (?,?,?,?,?,?)', values)
-        self.conn.commit()
+        
+        if commit:
+            self.conn.commit()
 
     def findMail(self, args):
         """
@@ -68,9 +78,30 @@ class ModmaildB:
 
         return praw.objects.Message(self.r, jsondict)
 
+    def loadBacklog(self):
+        modmail = self.r.get_mod_mail(self.subreddit, params=None, limit=None)
+
+        count = 0
+
+        for mail in modmail:
+            count += 1
+
+            if (count % 100) == 0: 
+                print(self.subreddit.display_name + ': ' + str(count) + ' modmails read')
+
+            try:
+                self.addMail(mail, commit=False)
+            except Exception as e:
+                pass
+
+        self.conn.commit()
+
     def purgedB(self):
-        self.c.execute('DROP TABLE modmail')
-        self.c.execute('DROP TABLE comments')
+        try:
+            self.c.execute('DROP TABLE modmail')
+        except sqlite3.OperationalError:
+            pass
+
         self.initTable()
 
     def close(self):
