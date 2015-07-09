@@ -9,7 +9,7 @@ class ModmaildB:
     def __init__(self, r, subreddit):
         self.r = r
         self.subreddit = subreddit
-        self.conn = sqlite3.connect(subreddit.display_name + '-modmail.db')
+        self.conn = sqlite3.connect('sqlite/' + subreddit.display_name + '.db')
         self.c = self.conn.cursor()
 
         self.initTable()
@@ -32,20 +32,13 @@ class ModmaildB:
         response = []
 
         for row in self.c.execute('SELECT * FROM modmail ORDER BY time DESC'):
-            compliance = 0
-
             for arg in args:
                 if arg[0:3] == 'to:' and row[2] == arg[3:]:
-                    compliance += 1
-                elif arg[0:5] == 'from:' and row[1] == arg[5:]:
-                    compliance += 1
-                elif arg.lower() in row[3].lower():
-                    compliance += 1
+                    if arg[0:5] == 'from:' and row[1] == arg[5:]:
+                        if arg.lower() in row[3].lower():
+                            response.append(self.messageFromRow(row))
 
-            if compliance == len(args):
-                if len(response) < 25:
-                    response.append(self.messageFromRow(row))
-                else:
+                if len(response) > 25:
                     break
 
         return response
@@ -70,7 +63,7 @@ class ModmaildB:
 
     def purgedB(self):
         self.c.execute('DROP TABLE modmail')
-        self.conn.commit()
+        self.c.execute('DROP TABLE comments')
         self.initTable()
 
     def close(self):

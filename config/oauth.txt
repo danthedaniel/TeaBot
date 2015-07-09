@@ -1,0 +1,11 @@
+# Config
+scope=identity,account,edit,flair,history,livemanage,modconfig,modflair,modlog,modothers,modposts,modself,modwiki,mysubreddits,privatemessages,read,report,save,submit,wikiedit,wikiread
+refreshable=True
+
+# Appinfo
+app_key=<api key>
+app_secret=<api secret>
+
+# Token
+token=
+refresh_token=

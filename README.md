@@ -7,21 +7,37 @@ Does not accept mod invites - you must create your own instance at this time.
 
 ###Setup
 
-In the teaBot.cfg file you first need to enter your bot's credentials, and then the subreddit(s) you want it to monitor. More than one subreddit can be added by seperating each subreddit name with a comma.
-
-    [teaBot credentials]
-    username=mybot
-    password=mypassword
+In the config/teaBot.cfg file you first need to enter the subreddit(s) you want it to monitor. More than one subreddit can be added by seperating each subreddit name with a comma.
 
     [General]
     version=0.9.2
     subreddits=subreddit1,subreddit2,subreddit3
-    useragent=LittleTeaBot/%(version)s by teaearlgraycold
+    useragent=TeaBot/%(version)s by teaearlgraycold
+
+Then in config/oauth.txt you'll need to enter your API key and API secret.
+
+    # Config
+    scope=identity,account,edit,flair,history,livemanage,modconfig,modflair,modlog,modothers,modposts,modself,modwiki,mysubreddits,privatemessages,read,report,save,submit,wikiedit,wikiread
+    refreshable=True
+
+    # Appinfo
+    app_key=<key here>
+    app_secret=<secret here>
+
+    # Token
+    token=None
+    refresh_token=None
+
+For the initial launch you'll want to run the script on a local machine. Login to the bot account and run the script - a web browser window should open and prompt you to authorize the script to run on the account. After this step you are free to run TeaBot from any other machine without re-authorization (as long as you move over the oauth.txt file).
     
 Python-wise you should only need:
 
 * Python 3.X
 * PRAW
+* OAuth2Util
+
+    pip install praw
+    pip install praw-oauth2util
 
 Just run the `main.py` file.
     
