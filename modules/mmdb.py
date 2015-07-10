@@ -19,8 +19,7 @@ class ModmaildB:
             self.c.execute('SELECT * FROM modmail') # Check if table exists
         except sqlite3.OperationalError:
             print(self.subreddit.display_name + ': initializing database')
-
-            # self.r.send_message(self.subreddit, 'Modmail DataBase Status', 'Your modmail history is currently being archived as far back as is possible')
+            self.r.send_message(self.subreddit, 'Modmail DataBase Status', 'Your modmail history is currently being archived as far back as is possible')
             
             self.c.execute('CREATE TABLE IF NOT EXISTS modmail (id text, user text, dest text, body text, time real, subject text)')
             self.loadBacklog()

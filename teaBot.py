@@ -204,7 +204,7 @@ class TeaBot:
             except ModPermissionError:
                 message.reply('**Error:**\n\nYou have insufficient permissions to perform this command')
             except UserNotFoundError:
-                message.reply('**Error**:\n\nUser "' + username + '" not found')
+                message.reply('**Error**:\n\nUser not found')
             except Exception as e:
                 message.repli('**Error**:\n\nAn unknown error occured, you may want to check the syntax of the command')
                 self.printlog('Unhandled exception thrown while executing:\n' + group[0])
