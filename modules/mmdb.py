@@ -20,7 +20,7 @@ class ModmaildB:
         except sqlite3.OperationalError:
             print(self.subreddit.display_name + ': initializing database')
 
-            self.r.send_message(self.subreddit, 'Modmail DataBase Status', 'Your modmail history is currently being archived as far back as is possible')
+            # self.r.send_message(self.subreddit, 'Modmail DataBase Status', 'Your modmail history is currently being archived as far back as is possible')
             
             self.c.execute('CREATE TABLE IF NOT EXISTS modmail (id text, user text, dest text, body text, time real, subject text)')
             self.loadBacklog()
@@ -45,15 +45,15 @@ class ModmaildB:
             compliance = 0
 
             for arg in args:
-                if arg[0:3] == 'to:' and row[2] == arg[3:]:
+                if arg[0:3] == 'to:' and row[2].lower() == arg[3:].lower():
                     compliance += 1
-                elif arg[0:5] == 'from:' and row[1] == arg[5:]:
+                elif arg[0:5] == 'from:' and row[1].lower() == arg[5:].lower():
                     compliance += 1
-                elif arg.lower() in row[3].lower():
+                elif arg[0:5] != 'from:' and arg[0:3] != 'to:' and arg.lower() in row[3].lower():
                     compliance += 1
 
             if compliance == len(args):
-                if len(response) < 25:
+                if len(response) <= 25:
                     response.append(self.messageFromRow(row))
                 else:
                     break
@@ -79,18 +79,21 @@ class ModmaildB:
         return praw.objects.Message(self.r, jsondict)
 
     def loadBacklog(self):
-        modmail = self.r.get_mod_mail(self.subreddit, params=None, limit=None)
-
         count = 0
 
-        for mail in modmail:
+        for modmail in self.r.get_mod_mail(self.subreddit, params=None, limit=None):
             count += 1
 
             if (count % 100) == 0: 
                 print(self.subreddit.display_name + ': ' + str(count) + ' modmails read')
 
             try:
-                self.addMail(mail, commit=False)
+                self.addMail(modmail, commit=False)
+
+                for reply in modmail.replies:
+                    count += 1
+
+                    self.addMail(reply, commit=False)
             except Exception as e:
                 pass
 

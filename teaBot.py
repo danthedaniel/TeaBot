@@ -131,7 +131,7 @@ class TeaBot:
         if (time.time() - subreddit.cache_timeout['modmail']) > self.cache_timeout:
             subreddit.cache_timeout['modmail'] = time.time()
 
-            for modmail in subreddit.praw.get_mod_mail(limit=10):
+            for modmail in subreddit.praw.get_mod_mail(limit=30):
                 #Perform checks on top level modmail            
                 if modmail.new == True:
                     subreddit.mmdb.addMail(modmail) # Add modmail to dB
@@ -249,7 +249,7 @@ class TeaBot:
                 except AttributeError:
                     response += '1. [**' + str(modmail.author.display_name) + '**: ' + modmail.subject + '](http://reddit.com/message/messages/' + modmail.id + ')\n' 
 
-        if len(foundMail) == 0:
+        if response == '':
             message.reply('**No matching results found**')
         else:
             message.reply('**Results:**\n\n' + response)
