@@ -206,7 +206,7 @@ class TeaBot:
             except UserNotFoundError:
                 message.reply('**Error**:\n\nUser not found')
             except Exception as e:
-                message.repli('**Error**:\n\nAn unknown error occured, you may want to check the syntax of the command')
+                message.reply('**Error**:\n\nAn unknown error occured, you may want to check the syntax of the command')
                 self.printlog('Unhandled exception thrown while executing:\n' + group[0])
                 traceback.print_exc()
 
