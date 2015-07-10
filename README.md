@@ -43,7 +43,13 @@ Just run the `main.py` file.
     
 The bot must be a moderator on each subreddit it monitors, and must be given at least `mail` and `wiki` to shadowban, but should also be given `config`, `posts`, and `flair` if you want it to be able to lock and sticky threads. `access` would also be necessary if you want to use the !ban command.
 
-To prevent issues with parsing and re-building the AutoModerator wiki page (/wiki/automoderator), TeaBot just uses a simply find-replace method to add shadowbans and locks to the wiki page. In order to allow for this add `"do_not_remove"` to your list of shadowbans (quotation marks required).
+To prevent issues with parsing and re-building the AutoModerator wiki page (/wiki/automoderator), TeaBot just uses a simple find-replace method to add shadowbans and locks to the wiki page. In order to allow for this add `"do_not_remove"` to your list of shadowbans (quotation marks required).
+
+For example:
+
+    # Shadowbans
+    author: ["do_not_remove", "<shadowbanned user 1>", "<shadowbanned user 2>"]
+    action: remove
 
 For thread locking you'll want a CSS class named "Locked" in order to show the thread locking flair to users.
 
