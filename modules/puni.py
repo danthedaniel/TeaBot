@@ -32,7 +32,7 @@ def expand_url(note, subreddit):
     if note.link == '':
         return None
     else:
-        parts = self.note.split(',')
+        parts = note.split(',')
         
         if parts[0] == 'm':
             return 'https://reddit.com/message/messages/' + parts[1]
