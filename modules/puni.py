@@ -9,41 +9,6 @@ from modules import puniExceptions
 
 warning_types = ['none','spamwatch','spamwarn','abusewarn','ban','permban','botban', 'gooduser']
 
-def compress_url(link):
-    comments = re.compile(r'/comments/([A-Za-z\d]{6})/[^\s]+/([A-Za-z\d]{7})?')
-    messages = re.compile(r'/message/messages/([A-Za-z\d]{6})')
-    
-    matches = re.findall(comments, link)
-    
-    if len(matches) == 0:
-        matches = re.findall(messages, link)
-        
-        if len(matches) == 0:
-            return ''
-        else:
-            return 'm,' + matches[0]
-    else:
-        if matches[0][1] == '':
-            return 'l,' + matches[0][0]
-        else:
-            return 'l,' + matches[0][0] + ',' + matches[0][1]
-
-def expand_url(note, subreddit):
-    if note.link == '':
-        return None
-    else:
-        parts = self.note.split(',')
-        
-        if parts[0] == 'm':
-            return 'https://reddit.com/message/messages/' + parts[1]
-        if parts[0] == 'l':
-            if len(parts) > 2:
-                return 'https://reddit.com/r/' + subreddit.display_name + '/comments/' + parts[1] + '/-/' + parts[2]
-            else:
-                return 'https://reddit.com/r/' + subreddit.display_name + '/comments/' + parts[1]
-        else:
-            return None
-
 class Note:
     def __init__(self, username, note, moderator=None, link='', warning='none', time=int(time.time())):
         self.username = username
@@ -53,12 +18,54 @@ class Note:
         self.note = note
         self.time = time
         self.moderator = moderator
-        self.link = link
+        self.link = self.compress_url(link)
 
         if warning in warning_types:
             self.warning = warning
         else:
             self.warning = 'none'
+
+    def compress_url(self, link):
+        comments = re.compile(r'/comments/([A-Za-z\d]{6})/[^\s]+/([A-Za-z\d]{7})?')
+        messages = re.compile(r'/message/messages/([A-Za-z\d]{6})')
+        
+        matches = re.findall(comments, link)
+        
+        if len(matches) == 0:
+            matches = re.findall(messages, link)
+            
+            if len(matches) == 0:
+                return link
+            else:
+                return 'm,' + matches[0]
+        else:
+            if matches[0][1] == '':
+                return 'l,' + matches[0][0]
+            else:
+                return 'l,' + matches[0][0] + ',' + matches[0][1]
+
+    def permalink(self, subreddit=None):
+        """
+        Expands compressed URL format to a full URL address
+
+        If no subreddit is provided and the link is to a thread rather than a
+        modmail returns None
+        """
+        if self.link == '':
+            return None
+        else:
+            parts = self.note.split(',')
+            
+            if parts[0] == 'm':
+                return 'https://reddit.com/message/messages/' + parts[1]
+            if parts[0] == 'l':
+                if subreddit:
+                    if len(parts) > 2:
+                        return 'https://reddit.com/r/' + subreddit.display_name + '/comments/' + parts[1] + '/-/' + parts[2]
+                    else:
+                        return 'https://reddit.com/r/' + subreddit.display_name + '/comments/' + parts[1]
+            
+            return None
 
     def __str__(self):
         return self.username + ": " + self.note
@@ -156,7 +163,7 @@ class UserNotes:
                 print('puni needs the wiki permission to write to usernotes')
 
             elif e.response.status_code == 503:
-                if attempts != 0:
+                if attempts > 0:
                     self.set_json(notes, reason, attempts - 1)
                 elif attempts == 0:
                     raise ServerResponseError('Could not get response while writing usernotes')

@@ -44,10 +44,10 @@ class TeaBot:
         sr_list        = config.get('General', 'subreddits').split(',')
         self.useragent = config.get('General', 'useragent')
 
-        self.inbox_timeout = 0      # Bot's inbox timeout
+        self.inbox_timeout = 0 # Bot's inbox timeout
         self.OAuth_timeout = time.time()
 
-        logging.basicConfig(filename='teaBot.log',level=logging.WARNING)
+        logging.basicConfig(filename='teaBot.log', level=logging.WARNING)
 
         self.r = praw.Reddit(user_agent=self.useragent)
         self.o = OAuth2Util.OAuth2Util(self.r, configfile='config/oauth.txt')
@@ -56,6 +56,9 @@ class TeaBot:
         self.r.config.cache_timeout = -1
         self.cache_timeout = 6
         self.r.config.api_request_delay = 1.0
+
+        if sr_list == '':
+            sr_list = self.get_my_subreddits()
 
         self.printlog('TeaBot v' + self.version + ' started')
 
@@ -73,7 +76,7 @@ class TeaBot:
             subreddit.mmdb.close()
 
     def rounds(self):
-        refresh_period = 3600 - 30
+        refresh_period = 3600 - 30 # Just a few seconds less than an hour
 
         if (time.time() - self.OAuth_timeout) >= refresh_period:
             self.OAuth_timeout = time.time()
@@ -84,18 +87,27 @@ class TeaBot:
         for subreddit in self.subreddits:
             self.check_modmail(subreddit)
 
+    def get_my_subreddits(self):
+        sr_list = []
+        response = self.r.request('https://api.reddit.com/subreddits/mine/moderator/').json()
+
+        for subreddit in response['data']['children']:
+            sr_list.append(subreddit['data']['display_name'])
+
+        return sr_list
+
     def get_all_perms(self, subreddit, override=False):
         """
         Refreshes subreddit's cached moderator permissions if more than an hour has passed
         API will return permissions of:
         wiki, posts, access, mail, config, flair, or just: all
         """
-        seconds_in_hour = 3600
+        seconds_in_an_hour = 3600
 
-        if (time.time() - subreddit.cache_timeout['moderators']) > seconds_in_hour or override:
+        if (time.time() - subreddit.cache_timeout['moderators']) > seconds_in_an_hour or override:
             subreddit.cache_timeout['moderators'] = time.time()
 
-            response = self.r.request('https://www.reddit.com/r/' + subreddit.praw.display_name + '/about/moderators.json').json()
+            response = self.r.request('https://api.reddit.com/r/' + subreddit.praw.display_name + '/about/moderators/').json()
 
             for user in response['data']['children']:
                 subreddit.permissions_cache[user['name']] = user['mod_permissions']
@@ -206,7 +218,7 @@ class TeaBot:
             except UserNotFoundError:
                 message.reply('**Error**:\n\nUser not found')
             except Exception as e:
-                message.repli('**Error**:\n\nAn unknown error occured, you may want to check the syntax of the command')
+                message.reply('**Error**:\n\nAn unknown error occured, you may want to check the syntax of the command')
                 self.printlog('Unhandled exception thrown while executing:\n' + group[0])
                 traceback.print_exc()
 
@@ -219,7 +231,7 @@ class TeaBot:
         logging.info('[' + time.ctime(int(time.time())) + '] ' + logmessage)
         print('[' + time.ctime(int(time.time())) + '] ' + logmessage)
 
-    def get_user(self, message, username):
+    def get_user(self, username):
         try:
             return self.r.get_redditor(username)
 
@@ -255,14 +267,14 @@ class TeaBot:
             message.reply('**Results:**\n\n' + response)
 
     def do_spam(self, message, arguments):
-        user = self.get_user(message, arguments[0])
+        user = self.get_user(arguments[0])
 
         spam_thread = self.r.submit('spam', 'overview for ' + user.name, url='http://reddit.com/user/' + user.name)
         message.reply('User [**' + user.name + '**](http://reddit.com/user/' + user.name + ') has been flagged in /r/spam [here](' + spam_thread.permalink + ').\n\nIf the account is still up after a few minutes you may need to [contact the admins](http://reddit.com/message/compose?subject=Spam - /u/' + user.name + '&to=/r/reddit.com).')
 
     def do_shadowban(self, subreddit, message, arguments):
         self.check_perms(subreddit, message, ['access'])
-        user = self.get_user(message, arguments[0])
+        user = self.get_user(arguments[0])
 
         reason = ' '.join(arguments[1:])
 
@@ -291,32 +303,29 @@ class TeaBot:
     def do_lock(self, subreddit, message, arguments, comment):
         self.check_perms(subreddit, message, ['posts'])
 
-        if len(comment_line) >= 2:
-            try:
-                locked_thread = praw.objects.Submission.from_url(self.r, permalink)
-            except Exception as e:
-                message.reply('**Error:**\n\nMalformed URL: ' + arguments[0] + '\n\nAcceptable format: http://www.reddit.com/r/' + subreddit.praw.display_name + '/comments/linkid/')
-                self.printlog('Malformed URL for thread lock: ' + arguments[0])
+        pattern = re.compile(r'^http://(www\.)?')
+        permalink = re.sub(pattern, 'https://www.', arguments[0])
 
-                raise CommandSyntaxError('Malformed thread URL')
+        try:
+            locked_thread = praw.objects.Submission.from_url(self.r, permalink)
+        except Exception as e:
+            message.reply('**Error:**\n\nMalformed URL: ' + arguments[0] + '\n\nAcceptable format: http://www.reddit.com/r/' + subreddit.praw.display_name + '/comments/linkid/')
+            self.printlog('Malformed URL for thread lock: ' + arguments[0])
+            raise CommandSyntaxError('Malformed thread URL')
 
-            locked_thread.set_flair('Locked')
+        locked_thread.set_flair('Locked')
 
-            if comment_matches != None:
-                new_comment = locked_thread.add_comment(comment)
-                new_comment.distinguish()
-
-                message.reply('[**' + locked_thread.title + '**](' + locked_thread.permalink + ') has been locked.\n\nTo view the comment automatically made in the thread [click here](' + new_comment.permalink + ').')
-            else:
-                message.reply('[**' + locked_thread.title + '**](' + locked_thread.permalink + ') has been locked.\n\nPlease post a comment explaining why it has been locked.')
-                
-                return ['lock_sticky', new_comment.id]
-
-            self.printlog('Locked ' + thread_id)
-
+        if comment:
+            new_comment = locked_thread.add_comment(comment)
+            new_comment.distinguish()
+            
+            message.reply('[**' + locked_thread.title + '**](' + locked_thread.permalink + ') has been locked.\n\nTo view the comment automatically made in the thread [click here](' + new_comment.permalink + ').')
+            
+            return ['lock_sticky', new_comment.id]
         else:
-            message.reply('**Syntax Error**:\n\n    !lock threadURL')
-            raise CommandSyntaxError('No thread URL provided')
+            message.reply('[**' + locked_thread.title + '**](' + locked_thread.permalink + ') has been locked.\n\nPlease post a comment explaining why it has been locked.')
+                
+        self.printlog('Locked ' + thread_id)
 
     def do_sticky(self, subreddit, message, arguments):
         self.check_perms(subreddit, message, ['posts'])
