@@ -9,8 +9,6 @@ from modules import puniExceptions
 
 warning_types = ['none','spamwatch','spamwarn','abusewarn','ban','permban','botban', 'gooduser']
 
-<<<<<<< HEAD
-=======
 def compress_url(link):
     comments = re.compile(r'/comments/([A-Za-z\d]{6})/[^\s]+/([A-Za-z\d]{7})?')
     messages = re.compile(r'/message/messages/([A-Za-z\d]{6})')
@@ -46,7 +44,6 @@ def expand_url(note, subreddit):
         else:
             return None
 
->>>>>>> origin/master
 class Note:
     def __init__(self, username, note, moderator=None, link='', warning='none', time=int(time.time())):
         self.username = username
